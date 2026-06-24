@@ -1,2 +1,286 @@
 package repository
 
+import (
+	"context"
+	"errors"
+	"strings"
+
+	"clasynq/api/auth/internal/domain"
+
+	"gorm.io/gorm"
+)
+
+type postgresUserRepository struct {
+	db *gorm.DB
+}
+
+func NewPostgresUserRepository(db *gorm.DB) domain.UserRepository {
+	return &postgresUserRepository{db: db}
+}
+
+func (r *postgresUserRepository) GetUserByID(ctx context.Context, id int64) (*domain.User, error) {
+	var user domain.User
+	if err := r.db.WithContext(ctx).First(&user, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (r *postgresUserRepository) GetUserByEmail(ctx context.Context, email string) (*domain.User, error) {
+	var user domain.User
+	if err := r.db.WithContext(ctx).Where("LOWER(email) = ?", strings.ToLower(email)).First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (r *postgresUserRepository) GetUserByUsername(ctx context.Context, username string) (*domain.User, error) {
+	var user domain.User
+	if err := r.db.WithContext(ctx).Where("LOWER(username) = ?", strings.ToLower(username)).First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (r *postgresUserRepository) GetUserByContact(ctx context.Context, contact string) (*domain.User, error) {
+	var user domain.User
+	if err := r.db.WithContext(ctx).Where("contact_number = ?", contact).First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (r *postgresUserRepository) SearchUsers(ctx context.Context, query string) ([]domain.User, error) {
+	var users []domain.User
+	q := "%" + strings.ToLower(query) + "%"
+	err := r.db.WithContext(ctx).
+		Where("LOWER(full_name) LIKE ? OR LOWER(username) LIKE ? OR LOWER(email) LIKE ?", q, q, q).
+		Limit(50).
+		Find(&users).Error
+	return users, err
+}
+
+func (r *postgresUserRepository) UpdateUser(ctx context.Context, user *domain.User) error {
+	return r.db.WithContext(ctx).Save(user).Error
+}
+
+func (r *postgresUserRepository) IsStudent(ctx context.Context, userID int64) (bool, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&domain.Student{}).Where("user_id = ?", userID).Count(&count).Error
+	return count > 0, err
+}
+
+func (r *postgresUserRepository) GetStudentProfile(ctx context.Context, userID int64) (*domain.Student, error) {
+	var student domain.Student
+	if err := r.db.WithContext(ctx).Preload("User").Where("user_id = ?", userID).First(&student).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &student, nil
+}
+
+func (r *postgresUserRepository) GetStudentReferralsCount(ctx context.Context, userID int64) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Table("payment_orders").
+		Where("referrer_id = ? AND status = 'completed'", userID).
+		Distinct("user_id").
+		Count(&count).Error
+	if err != nil {
+		return 0, nil
+	}
+	return count, nil
+}
+
+func (r *postgresUserRepository) GetAdminByEmail(ctx context.Context, email string) (*domain.Admin, error) {
+	var admin domain.Admin
+	if err := r.db.WithContext(ctx).Where("LOWER(email) = ?", strings.ToLower(email)).First(&admin).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &admin, nil
+}
+
+func (r *postgresUserRepository) GetTeacherByEmail(ctx context.Context, email string) (*domain.Teacher, error) {
+	var teacher domain.Teacher
+	if err := r.db.WithContext(ctx).Where("LOWER(email) = ?", strings.ToLower(email)).First(&teacher).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &teacher, nil
+}
+
+func (r *postgresUserRepository) GetTeacherByID(ctx context.Context, id int64) (*domain.Teacher, error) {
+	var teacher domain.Teacher
+	if err := r.db.WithContext(ctx).First(&teacher, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &teacher, nil
+}
+
+func (r *postgresUserRepository) GetAdminByID(ctx context.Context, id int64) (*domain.Admin, error) {
+	var admin domain.Admin
+	if err := r.db.WithContext(ctx).First(&admin, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &admin, nil
+}
+
+func (r *postgresUserRepository) GetPendingRegistration(ctx context.Context, email string) (*domain.PendingRegistration, error) {
+	var pending domain.PendingRegistration
+	if err := r.db.WithContext(ctx).Where("LOWER(email) = ?", strings.ToLower(email)).First(&pending).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &pending, nil
+}
+
+func (r *postgresUserRepository) SavePendingRegistration(ctx context.Context, pending *domain.PendingRegistration) error {
+	pending.Email = strings.ToLower(pending.Email)
+	pending.Username = strings.ToLower(pending.Username)
+	return r.db.WithContext(ctx).Save(pending).Error
+}
+
+func (r *postgresUserRepository) DeletePendingRegistration(ctx context.Context, email string) error {
+	return r.db.WithContext(ctx).Where("LOWER(email) = ?", strings.ToLower(email)).Delete(&domain.PendingRegistration{}).Error
+}
+
+func (r *postgresUserRepository) CreateUserFromPending(ctx context.Context, pending *domain.PendingRegistration) (*domain.User, error) {
+	var user domain.User
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		user = domain.User{
+			FullName:      pending.FullName,
+			Username:      strings.ToLower(pending.Username),
+			ContactNumber: pending.ContactNumber,
+			Email:         strings.ToLower(pending.Email),
+			Password:      pending.PasswordHash,
+		}
+
+		// Save User
+		if err := tx.Create(&user).Error; err != nil {
+			return err
+		}
+
+		// Save Student profile
+		student := domain.Student{
+			UserID: user.ID,
+		}
+		if err := tx.Create(&student).Error; err != nil {
+			return err
+		}
+
+		// Delete pending registration
+		if err := tx.Where("LOWER(email) = ?", strings.ToLower(pending.Email)).Delete(&domain.PendingRegistration{}).Error; err != nil {
+			return err
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (r *postgresUserRepository) GetPasswordResetOTP(ctx context.Context, email string) (*domain.PasswordResetOTP, error) {
+	var otp domain.PasswordResetOTP
+	if err := r.db.WithContext(ctx).Where("LOWER(email) = ?", strings.ToLower(email)).First(&otp).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &otp, nil
+}
+
+func (r *postgresUserRepository) SavePasswordResetOTP(ctx context.Context, reset *domain.PasswordResetOTP) error {
+	reset.Email = strings.ToLower(reset.Email)
+	return r.db.WithContext(ctx).Save(reset).Error
+}
+
+func (r *postgresUserRepository) DeletePasswordResetOTP(ctx context.Context, email string) error {
+	return r.db.WithContext(ctx).Where("LOWER(email) = ?", strings.ToLower(email)).Delete(&domain.PasswordResetOTP{}).Error
+}
+
+func (r *postgresUserRepository) GetFollowRelationship(ctx context.Context, followerID, followedID int64) (*domain.Follow, error) {
+	var follow domain.Follow
+	if err := r.db.WithContext(ctx).Where("follower_id = ? AND followed_id = ?", followerID, followedID).First(&follow).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &follow, nil
+}
+
+func (r *postgresUserRepository) FollowUser(ctx context.Context, followerID, followedID int64) error {
+	follow := domain.Follow{
+		FollowerID: followerID,
+		FollowedID: followedID,
+	}
+	return r.db.WithContext(ctx).Create(&follow).Error
+}
+
+func (r *postgresUserRepository) UnfollowUser(ctx context.Context, followerID, followedID int64) error {
+	return r.db.WithContext(ctx).Where("follower_id = ? AND followed_id = ?", followerID, followedID).Delete(&domain.Follow{}).Error
+}
+
+func (r *postgresUserRepository) GetFollowersList(ctx context.Context, userID int64) ([]domain.Follow, error) {
+	var follows []domain.Follow
+	err := r.db.WithContext(ctx).Preload("Follower").Where("followed_id = ?", userID).Find(&follows).Error
+	return follows, err
+}
+
+func (r *postgresUserRepository) GetFollowingList(ctx context.Context, userID int64) ([]domain.Follow, error) {
+	var follows []domain.Follow
+	err := r.db.WithContext(ctx).Preload("Followed").Where("follower_id = ?", userID).Find(&follows).Error
+	return follows, err
+}
+
+func (r *postgresUserRepository) GetNotifications(ctx context.Context, userID int64) ([]domain.UserNotification, error) {
+	var notifications []domain.UserNotification
+	err := r.db.WithContext(ctx).Preload("Sender").Where("recipient_id = ?", userID).Order("created_at desc").Find(&notifications).Error
+	return notifications, err
+}
+
+func (r *postgresUserRepository) MarkNotificationsAsRead(ctx context.Context, userID int64) error {
+	return r.db.WithContext(ctx).Model(&domain.UserNotification{}).Where("recipient_id = ?", userID).Update("is_read", true).Error
+}
+
+func (r *postgresUserRepository) CreateNotification(ctx context.Context, notif *domain.UserNotification) error {
+	return r.db.WithContext(ctx).Create(notif).Error
+}
+
+func (r *postgresUserRepository) UpdateAdminPassword(ctx context.Context, id int64, newHash string) error {
+	return r.db.WithContext(ctx).Model(&domain.Admin{}).Where("id = ?", id).Update("password", newHash).Error
+}
+
+func (r *postgresUserRepository) UpdateTeacherPassword(ctx context.Context, id int64, newHash string) error {
+	return r.db.WithContext(ctx).Model(&domain.Teacher{}).Where("id = ?", id).Update("password", newHash).Error
+}
+

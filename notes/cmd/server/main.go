@@ -3,33 +3,82 @@ package main
 import (
 	"log"
 	"net/http"
-	"os"
+	"strings"
+
+	"clasynq/api/notes/config"
+	delivery "clasynq/api/notes/internal/delivery/http"
+	"clasynq/api/notes/internal/repository"
+	"clasynq/api/notes/internal/usecase"
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
+	"github.com/redis/go-redis/v9"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
 
 func main() {
-	// Load parent directory .env (useful for monorepo development)
-	_ = godotenv.Load("../../.env")
-	// Load local directory .env (fallback/override)
 	_ = godotenv.Load(".env")
+	_ = godotenv.Load()
 
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8084" // fallback to default port for notes service
+	// 2. Load config
+	cfg := config.LoadConfig()
+	if cfg.Port == "" {
+		cfg.Port = "8084" // default port for notes service
 	}
 
+	// SSLMode check / disable for local pg if not specified
+	dbURL := cfg.DatabaseURL
+	if dbURL != "" && !strings.Contains(dbURL, "sslmode=") {
+		if strings.Contains(dbURL, "?") {
+			dbURL = dbURL + "&sslmode=disable"
+		} else {
+			dbURL = dbURL + "?sslmode=disable"
+		}
+	}
+
+	// 3. Connect to Postgres GORM
+	log.Printf("Connecting to Postgres at: %s", dbURL)
+	db, err := gorm.Open(postgres.Open(dbURL), &gorm.Config{})
+	if err != nil {
+		log.Fatalf("failed to connect to database: %v", err)
+	}
+
+	// 4. Connect to Redis (optional)
+	var rdb *redis.Client
+	if cfg.RedisURL != "" {
+		opt, err := redis.ParseURL(cfg.RedisURL)
+		if err == nil {
+			rdb = redis.NewClient(opt)
+			log.Println("Connected to Redis for session checks")
+		} else {
+			log.Printf("failed to parse Redis URL: %v", err)
+		}
+	}
+
+	// 5. Initialize Layers
+	repo := repository.NewPostgresNoteRepository(db)
+	uc := usecase.NewNoteUsecase(repo)
+	authMiddleware := delivery.AuthMiddleware(cfg.SecretKey, rdb)
+	optionalAuthMiddleware := delivery.OptionalAuthMiddleware(cfg.SecretKey)
+
+	// 6. Setup Router and Run
 	r := gin.Default()
+
+	// Serve uploaded files statically for local development
+	r.Static("/media", cfg.MediaRoot)
+	log.Printf("Serving static files from directory %s on /media route", cfg.MediaRoot)
+
 	r.GET("/ping", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"message": "pong from notes service",
 		})
 	})
 
-	log.Printf("Starting notes service on port %s", port)
-	if err := r.Run(":" + port); err != nil {
+	delivery.RegisterRoutes(r, uc, cfg.MediaRoot, cfg.BaseURL, authMiddleware, optionalAuthMiddleware)
+
+	log.Printf("Starting notes service on port %s", cfg.Port)
+	if err := r.Run(":" + cfg.Port); err != nil {
 		log.Fatalf("failed to start server: %v", err)
 	}
 }
-

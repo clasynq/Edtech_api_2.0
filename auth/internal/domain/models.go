@@ -1,3 +1,3 @@
 package domain
 
-// Define shared domain structures here
+// All GORM database entities and interfaces are defined inside user.go
