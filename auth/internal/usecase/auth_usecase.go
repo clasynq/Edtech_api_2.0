@@ -683,12 +683,12 @@ func (u *userUsecase) UnfollowUser(ctx context.Context, followerID, followedID i
 	return u.repo.UnfollowUser(ctx, followerID, followedID)
 }
 
-func (u *userUsecase) GetNotifications(ctx context.Context, userID int64) ([]domain.UserNotification, error) {
-	return u.repo.GetNotifications(ctx, userID)
+func (u *userUsecase) GetNotifications(ctx context.Context, userID int64, role string) ([]domain.UserNotification, error) {
+	return u.repo.GetNotifications(ctx, userID, role)
 }
 
-func (u *userUsecase) MarkNotificationsAsRead(ctx context.Context, userID int64) error {
-	return u.repo.MarkNotificationsAsRead(ctx, userID)
+func (u *userUsecase) MarkNotificationsAsRead(ctx context.Context, userID int64, role string) error {
+	return u.repo.MarkNotificationsAsRead(ctx, userID, role)
 }
 
 // Compile complete StudentProfile serializable response

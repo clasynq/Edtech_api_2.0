@@ -1,6 +1,13 @@
 # Golang Microservice Migration Blueprint
 
+> [!IMPORTANT]
+> **CRITICAL RULES**:
+> 1. Under any circumstances, the files in the directory `D:\clasynq_02\Backend` **must not be changed or modified**. This directory contains the active production Django application code and serves only as a read-only reference for the migration. All backend development, modifications, and microservice implementations must be written strictly within `D:\Clasynq_future_update\API_2.0`.
+> 2. All frontend development and modifications must strictly target the directory `D:\Clasynq_future_update\frontend_02`. This frontend is the only one connected to the new microservice architecture. Do not touch or modify any other frontend directory.
+
 This document provides a comprehensive, step-by-step technical blueprint to migrate the **ClaSynq Django Monolith** (source folder: `D:\clasynq_02\Backend`) to a high-performance **Golang Microservice Architecture** (to be created in folder: `D:\Clasynq_future_update\API_2.0`) without modifying the existing PostgreSQL schema, altering the React frontend, or changing environment credentials.
+
+
 
 ---
 

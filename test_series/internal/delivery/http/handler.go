@@ -37,26 +37,31 @@ func RegisterRoutes(
 
 	auth := r.Group("/api/test-series", authMiddleware)
 	{
-		auth.POST("/", AdminRequired(), handler.CreateTestSeries)
-		auth.POST("/:id/tests", AdminRequired(), handler.CreateTest)
-		auth.POST("/tests/:id/questions", AdminRequired(), handler.AddQuestion)
+		auth.POST("/", AdminOrTeacherRequired(), handler.CreateTestSeries)
+		auth.PUT("/:id", AdminOrTeacherRequired(), handler.UpdateTestSeries)
+		auth.PUT("/:id/", AdminOrTeacherRequired(), handler.UpdateTestSeries)
+		auth.DELETE("/:id", AdminOrTeacherRequired(), handler.DeleteTestSeries)
+		auth.DELETE("/:id/", AdminOrTeacherRequired(), handler.DeleteTestSeries)
+		auth.POST("/:id/tests", AdminOrTeacherRequired(), handler.CreateTest)
+		auth.POST("/tests/:id/questions", AdminOrTeacherRequired(), handler.AddQuestion)
 	}
 
 	// Legacy / CRUD routes for tests
 	tests := r.Group("/api/tests", authMiddleware)
 	{
 		tests.GET("/:id/", handler.GetTestDetails)
-		tests.PUT("/:id/", AdminRequired(), handler.UpdateTest)
-		tests.DELETE("/:id/", AdminRequired(), handler.DeleteTest)
-		tests.POST("/:id/upload_questions/", AdminRequired(), handler.UploadQuestions)
+		tests.POST("/", AdminOrTeacherRequired(), handler.CreateTestLegacy)
+		tests.PUT("/:id/", AdminOrTeacherRequired(), handler.UpdateTest)
+		tests.DELETE("/:id/", AdminOrTeacherRequired(), handler.DeleteTest)
+		tests.POST("/:id/upload_questions/", AdminOrTeacherRequired(), handler.UploadQuestions)
 	}
 
 	// Legacy / CRUD routes for questions
 	questions := r.Group("/api/questions", authMiddleware)
 	{
 		questions.GET("/", handler.GetQuestions)
-		questions.POST("/", AdminRequired(), handler.CreateQuestion)
-		questions.DELETE("/:id/", AdminRequired(), handler.DeleteQuestion)
+		questions.POST("/", AdminOrTeacherRequired(), handler.CreateQuestion)
+		questions.DELETE("/:id/", AdminOrTeacherRequired(), handler.DeleteQuestion)
 	}
 }
 
@@ -108,46 +113,15 @@ func (h *httpHandler) GetTestSeriesDetails(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"testSeries": ts,
-		"hasAccess":  hasAccess,
-	})
+	ts.HasAccess = hasAccess
+	c.JSON(http.StatusOK, ts)
 }
 
 func (h *httpHandler) CreateTestSeries(c *gin.Context) {
-	var req struct {
-		Title       string     `json:"title" binding:"required"`
-		Description string     `json:"description" binding:"required"`
-		BannerURL   string     `json:"bannerUrl" binding:"required"`
-		Category    string     `json:"category" binding:"required"`
-		BatchID     *string    `json:"batchId"`
-		IsPublished bool       `json:"isPublished"`
-		StartDate   *time.Time `json:"startDate"`
-		EndDate     *time.Time `json:"endDate"`
-		CourseID    *int64     `json:"courseId"`
-		IsFree      bool       `json:"isFree"`
-		Price       float64    `json:"price" binding:"required"`
-		Slug        string     `json:"slug"`
-	}
-
-	if err := c.ShouldBindJSON(&req); err != nil {
+	ts, err := h.parseTestSeries(c, nil)
+	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
 		return
-	}
-
-	ts := &domain.TestSeries{
-		Title:       req.Title,
-		Description: req.Description,
-		BannerURL:   req.BannerURL,
-		Category:    req.Category,
-		BatchID:     req.BatchID,
-		IsPublished: req.IsPublished,
-		StartDate:   req.StartDate,
-		EndDate:     req.EndDate,
-		CourseID:    req.CourseID,
-		IsFree:      req.IsFree,
-		Price:       req.Price,
-		Slug:        req.Slug,
 	}
 
 	if err := h.uc.CreateTestSeries(c.Request.Context(), ts); err != nil {
@@ -157,6 +131,225 @@ func (h *httpHandler) CreateTestSeries(c *gin.Context) {
 
 	c.JSON(http.StatusCreated, ts)
 }
+
+func (h *httpHandler) UpdateTestSeries(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "invalid test series ID"})
+		return
+	}
+
+	userID := int64(0)
+	role := ""
+	if uIDVal, exists := c.Get("userID"); exists {
+		userID = uIDVal.(int64)
+	}
+	if rVal, exists := c.Get("role"); exists {
+		role = rVal.(string)
+	}
+
+	existing, _, err := h.uc.GetTestSeriesByIDOrSlug(c.Request.Context(), userID, role, idStr)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
+		return
+	}
+	if existing == nil {
+		c.JSON(http.StatusNotFound, gin.H{"detail": "Test series not found"})
+		return
+	}
+
+	ts, err := h.parseTestSeries(c, existing)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+		return
+	}
+
+	if err := h.uc.UpdateTestSeries(c.Request.Context(), id, ts); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, ts)
+}
+
+func (h *httpHandler) DeleteTestSeries(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "invalid test series ID"})
+		return
+	}
+
+	if err := h.uc.DeleteTestSeries(c.Request.Context(), id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "deleted", "message": "Test series successfully deleted"})
+}
+
+func (h *httpHandler) parseTestSeries(c *gin.Context, existing *domain.TestSeries) (*domain.TestSeries, error) {
+	contentType := c.ContentType()
+	ts := &domain.TestSeries{}
+	if existing != nil {
+		ts = existing
+	}
+
+	if strings.Contains(contentType, "multipart/form-data") || strings.Contains(contentType, "application/x-www-form-urlencoded") {
+		_ = c.Request.ParseMultipartForm(32 << 20)
+
+		if val, exists := c.GetPostForm("title"); exists {
+			ts.Title = val
+		}
+		if val, exists := c.GetPostForm("description"); exists {
+			ts.Description = val
+		}
+		if val, exists := c.GetPostForm("category"); exists {
+			ts.Category = val
+		}
+
+		if val, exists := c.GetPostForm("batch_id"); exists {
+			ts.BatchID = &val
+		} else if val, exists := c.GetPostForm("batchId"); exists {
+			ts.BatchID = &val
+		}
+
+		isPublishedStr, hasPublished := c.GetPostForm("is_published")
+		if !hasPublished {
+			isPublishedStr, hasPublished = c.GetPostForm("isPublished")
+		}
+		if hasPublished {
+			ts.IsPublished, _ = strconv.ParseBool(isPublishedStr)
+		}
+
+		startDateStr, hasStart := c.GetPostForm("start_date")
+		if !hasStart {
+			startDateStr, hasStart = c.GetPostForm("startDate")
+		}
+		if hasStart {
+			if startDateStr == "" {
+				ts.StartDate = nil
+			} else if t, err := time.Parse("2006-01-02", startDateStr); err == nil {
+				ts.StartDate = &t
+			} else if t, err := time.Parse(time.RFC3339, startDateStr); err == nil {
+				ts.StartDate = &t
+			}
+		}
+
+		endDateStr, hasEnd := c.GetPostForm("end_date")
+		if !hasEnd {
+			endDateStr, hasEnd = c.GetPostForm("endDate")
+		}
+		if hasEnd {
+			if endDateStr == "" {
+				ts.EndDate = nil
+			} else if t, err := time.Parse("2006-01-02", endDateStr); err == nil {
+				ts.EndDate = &t
+			} else if t, err := time.Parse(time.RFC3339, endDateStr); err == nil {
+				ts.EndDate = &t
+			}
+		}
+
+		courseIDStr, hasCourse := c.GetPostForm("course")
+		if !hasCourse {
+			courseIDStr, hasCourse = c.GetPostForm("courseId")
+		}
+		if hasCourse {
+			if courseIDStr == "" {
+				ts.CourseID = nil
+			} else if cid, err := strconv.ParseInt(courseIDStr, 10, 64); err == nil {
+				ts.CourseID = &cid
+			}
+		}
+
+		isFreeStr, hasFree := c.GetPostForm("is_free")
+		if !hasFree {
+			isFreeStr, hasFree = c.GetPostForm("isFree")
+		}
+		if hasFree {
+			ts.IsFree, _ = strconv.ParseBool(isFreeStr)
+		}
+
+		if priceStr, exists := c.GetPostForm("price"); exists {
+			ts.Price, _ = strconv.ParseFloat(priceStr, 64)
+		}
+
+		if slugStr, exists := c.GetPostForm("slug"); exists {
+			ts.Slug = slugStr
+		}
+
+		// Handle banner image upload
+		bannerURL, err := saveUploadFile(c, "banner", "banners")
+		if err == nil && bannerURL != "" {
+			ts.BannerURL = bannerURL
+		} else {
+			// Only update BannerURL from text field if it is provided
+			if val, exists := c.GetPostForm("bannerUrl"); exists {
+				ts.BannerURL = val
+			}
+		}
+	} else {
+		// Fallback to JSON
+		var req struct {
+			Title       *string    `json:"title"`
+			Description *string    `json:"description"`
+			BannerURL   *string    `json:"bannerUrl"`
+			Category    *string    `json:"category"`
+			BatchID     **string   `json:"batchId"`
+			IsPublished *bool      `json:"isPublished"`
+			StartDate   *time.Time `json:"startDate"`
+			EndDate     *time.Time `json:"endDate"`
+			CourseID    *int64     `json:"courseId"`
+			IsFree      *bool      `json:"isFree"`
+			Price       *float64   `json:"price"`
+			Slug        *string    `json:"slug"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			return nil, err
+		}
+
+		if req.Title != nil {
+			ts.Title = *req.Title
+		}
+		if req.Description != nil {
+			ts.Description = *req.Description
+		}
+		if req.BannerURL != nil {
+			ts.BannerURL = *req.BannerURL
+		}
+		if req.Category != nil {
+			ts.Category = *req.Category
+		}
+		if req.BatchID != nil {
+			ts.BatchID = *req.BatchID
+		}
+		if req.IsPublished != nil {
+			ts.IsPublished = *req.IsPublished
+		}
+		if req.StartDate != nil {
+			ts.StartDate = req.StartDate
+		}
+		if req.EndDate != nil {
+			ts.EndDate = req.EndDate
+		}
+		if req.CourseID != nil {
+			ts.CourseID = req.CourseID
+		}
+		if req.IsFree != nil {
+			ts.IsFree = *req.IsFree
+		}
+		if req.Price != nil {
+			ts.Price = *req.Price
+		}
+		if req.Slug != nil {
+			ts.Slug = *req.Slug
+		}
+	}
+
+	return ts, nil
+}
+
 
 func (h *httpHandler) CreateTest(c *gin.Context) {
 	seriesIDStr := c.Param("id")
@@ -201,6 +394,45 @@ func (h *httpHandler) CreateTest(c *gin.Context) {
 
 	c.JSON(http.StatusCreated, test)
 }
+
+func (h *httpHandler) CreateTestLegacy(c *gin.Context) {
+	var req struct {
+		TestSeries      int64   `json:"testSeries" binding:"required"`
+		Title           string  `json:"title" binding:"required"`
+		Description     string  `json:"description" binding:"required"`
+		DurationMinutes int     `json:"durationMinutes" binding:"required"`
+		TotalMarks      int     `json:"totalMarks" binding:"required"`
+		NegativeMarking bool    `json:"negativeMarking"`
+		Instructions    *string `json:"instructions"`
+		IsPublished     bool    `json:"isPublished"`
+		Slug            string  `json:"slug"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+		return
+	}
+
+	test := &domain.Test{
+		Title:           req.Title,
+		Description:     req.Description,
+		DurationMinutes: req.DurationMinutes,
+		TotalMarks:      req.TotalMarks,
+		NegativeMarking: req.NegativeMarking,
+		Instructions:    req.Instructions,
+		IsPublished:     req.IsPublished,
+		TestSeriesID:    req.TestSeries,
+		Slug:            req.Slug,
+	}
+
+	if err := h.uc.CreateTest(c.Request.Context(), test); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, test)
+}
+
 
 func (h *httpHandler) AddQuestion(c *gin.Context) {
 	testIDStr := c.Param("id")

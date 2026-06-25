@@ -58,6 +58,7 @@ type TestSeries struct {
 	IsFree      bool       `gorm:"column:is_free;type:boolean;not null;default:false" json:"isFree"`
 	Price       float64    `gorm:"column:price;type:numeric(10,2);not null" json:"price"`
 	Slug        string     `gorm:"column:slug;type:varchar(100);uniqueIndex" json:"slug"`
+	HasAccess   bool       `json:"hasAccess" gorm:"-"`
 
 	// Preloaded list of tests
 	Tests []Test `gorm:"foreignKey:TestSeriesID" json:"tests,omitempty"`
@@ -136,6 +137,8 @@ type TestSeriesRepository interface {
 	GetTestSeries(ctx context.Context, filters map[string]string) ([]TestSeries, error)
 	GetTestSeriesByIDOrSlug(ctx context.Context, idOrSlug string) (*TestSeries, error)
 	CreateTestSeries(ctx context.Context, ts *TestSeries) error
+	UpdateTestSeries(ctx context.Context, id int64, ts *TestSeries) error
+	DeleteTestSeries(ctx context.Context, id int64) error
 
 	GetTestByIDOrSlug(ctx context.Context, idOrSlug string) (*Test, error)
 	CreateTest(ctx context.Context, test *Test) error
@@ -158,6 +161,8 @@ type TestSeriesUsecase interface {
 	GetTestSeries(ctx context.Context, userID int64, role string, filters map[string]string) ([]TestSeries, error)
 	GetTestSeriesByIDOrSlug(ctx context.Context, userID int64, role string, idOrSlug string) (*TestSeries, bool, error)
 	CreateTestSeries(ctx context.Context, ts *TestSeries) error
+	UpdateTestSeries(ctx context.Context, id int64, ts *TestSeries) error
+	DeleteTestSeries(ctx context.Context, id int64) error
 
 	GetTestByIDOrSlug(ctx context.Context, idOrSlug string) (*Test, error)
 	CreateTest(ctx context.Context, test *Test) error

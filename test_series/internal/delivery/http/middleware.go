@@ -132,3 +132,17 @@ func AdminRequired() gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+// AdminOrTeacherRequired checks if user has admin or teacher privileges
+func AdminOrTeacherRequired() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		roleVal, exists := c.Get("role")
+		if !exists || (roleVal.(string) != "admin" && roleVal.(string) != "teacher") {
+			c.JSON(http.StatusForbidden, gin.H{"detail": "You do not have permission to perform this action."})
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+

@@ -127,6 +127,7 @@ type UserNotification struct {
 	ID               int64     `gorm:"primaryKey;column:id" json:"id"`
 	RecipientID      int64     `gorm:"column:recipient_id;index;not null" json:"recipientId"`
 	Recipient        User      `gorm:"foreignKey:RecipientID;constraint:OnDelete:CASCADE" json:"-"`
+	RecipientRole    string    `gorm:"column:recipient_role;type:varchar(50);default:'student'" json:"recipientRole"`
 	SenderID         *int64    `gorm:"column:sender_id;index" json:"senderId"`
 	Sender           *User     `gorm:"foreignKey:SenderID;constraint:OnDelete:SET NULL" json:"sender,omitempty"`
 	NotificationType string    `gorm:"column:notification_type;type:varchar(50);default:'follow'" json:"notificationType"`
@@ -171,8 +172,8 @@ type UserRepository interface {
 	GetFollowersList(ctx context.Context, userID int64) ([]Follow, error)
 	GetFollowingList(ctx context.Context, userID int64) ([]Follow, error)
 
-	GetNotifications(ctx context.Context, userID int64) ([]UserNotification, error)
-	MarkNotificationsAsRead(ctx context.Context, userID int64) error
+	GetNotifications(ctx context.Context, userID int64, role string) ([]UserNotification, error)
+	MarkNotificationsAsRead(ctx context.Context, userID int64, role string) error
 	CreateNotification(ctx context.Context, notif *UserNotification) error
 	UpdateAdminPassword(ctx context.Context, id int64, newHash string) error
 	UpdateTeacherPassword(ctx context.Context, id int64, newHash string) error
@@ -191,7 +192,7 @@ type UserUsecase interface {
 	SearchUsers(ctx context.Context, query string) ([]map[string]interface{}, error)
 	FollowUser(ctx context.Context, followerID, followedID int64) error
 	UnfollowUser(ctx context.Context, followerID, followedID int64) error
-	GetNotifications(ctx context.Context, userID int64) ([]UserNotification, error)
-	MarkNotificationsAsRead(ctx context.Context, userID int64) error
+	GetNotifications(ctx context.Context, userID int64, role string) ([]UserNotification, error)
+	MarkNotificationsAsRead(ctx context.Context, userID int64, role string) error
 	TokenRefresh(ctx context.Context, refreshToken string) (map[string]string, error)
 }

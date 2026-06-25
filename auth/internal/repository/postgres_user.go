@@ -262,14 +262,14 @@ func (r *postgresUserRepository) GetFollowingList(ctx context.Context, userID in
 	return follows, err
 }
 
-func (r *postgresUserRepository) GetNotifications(ctx context.Context, userID int64) ([]domain.UserNotification, error) {
+func (r *postgresUserRepository) GetNotifications(ctx context.Context, userID int64, role string) ([]domain.UserNotification, error) {
 	var notifications []domain.UserNotification
-	err := r.db.WithContext(ctx).Preload("Sender").Where("recipient_id = ?", userID).Order("created_at desc").Find(&notifications).Error
+	err := r.db.WithContext(ctx).Preload("Sender").Where("recipient_id = ? AND recipient_role = ?", userID, role).Order("created_at desc").Find(&notifications).Error
 	return notifications, err
 }
 
-func (r *postgresUserRepository) MarkNotificationsAsRead(ctx context.Context, userID int64) error {
-	return r.db.WithContext(ctx).Model(&domain.UserNotification{}).Where("recipient_id = ?", userID).Update("is_read", true).Error
+func (r *postgresUserRepository) MarkNotificationsAsRead(ctx context.Context, userID int64, role string) error {
+	return r.db.WithContext(ctx).Model(&domain.UserNotification{}).Where("recipient_id = ? AND recipient_role = ?", userID, role).Update("is_read", true).Error
 }
 
 func (r *postgresUserRepository) CreateNotification(ctx context.Context, notif *domain.UserNotification) error {

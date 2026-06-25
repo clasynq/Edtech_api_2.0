@@ -3,6 +3,8 @@ package main
 import (
 	"log"
 	"net/http"
+	"os"
+	"time"
 
 	"clasynq/api/auth/config"
 	delivery "clasynq/api/auth/internal/delivery/http"
@@ -13,6 +15,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 func main() {
@@ -24,7 +27,19 @@ func main() {
 
 	log.Printf("Connecting to Postgres at: %s", cfg.DatabaseURL)
 	// 2. Connect to Postgres
-	db, err := gorm.Open(postgres.Open(cfg.DatabaseURL), &gorm.Config{})
+	dbLogger := logger.New(
+		log.New(os.Stdout, "\r\n", log.LstdFlags),
+		logger.Config{
+			SlowThreshold:             time.Second,
+			LogLevel:                  logger.Info,
+			IgnoreRecordNotFoundError: true,
+			Colorful:                  true,
+		},
+	)
+	db, err := gorm.Open(postgres.Open(cfg.DatabaseURL), &gorm.Config{
+		Logger: dbLogger,
+	})
+
 	if err != nil {
 		log.Fatalf("failed to connect to database: %v", err)
 	}

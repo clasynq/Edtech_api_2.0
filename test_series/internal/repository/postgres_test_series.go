@@ -188,3 +188,29 @@ func (r *postgresTestSeriesRepository) DeleteQuestion(ctx context.Context, id in
 		return tx.Delete(&domain.Question{}, id).Error
 	})
 }
+
+func (r *postgresTestSeriesRepository) UpdateTestSeries(ctx context.Context, id int64, ts *domain.TestSeries) error {
+	ts.ID = id
+	return r.db.WithContext(ctx).Omit("Tests").Save(ts).Error
+}
+
+func (r *postgresTestSeriesRepository) DeleteTestSeries(ctx context.Context, id int64) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var tests []domain.Test
+		if err := tx.Where("test_series_id = ?", id).Find(&tests).Error; err == nil {
+			for _, test := range tests {
+				var questions []domain.Question
+				if err := tx.Where("test_id = ?", test.ID).Find(&questions).Error; err == nil {
+					for _, q := range questions {
+						_ = tx.Where("question_id = ?", q.ID).Delete(&domain.QuestionOption{}).Error
+					}
+				}
+				_ = tx.Where("test_id = ?", test.ID).Delete(&domain.Question{}).Error
+				_ = tx.Delete(&domain.Test{}, test.ID).Error
+			}
+		}
+		_ = tx.Where("test_series_id = ?", id).Delete(&domain.TestSeriesAccess{}).Error
+		return tx.Delete(&domain.TestSeries{}, id).Error
+	})
+}
+

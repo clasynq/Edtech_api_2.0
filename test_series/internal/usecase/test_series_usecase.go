@@ -366,3 +366,12 @@ func (u *testSeriesUsecase) UploadQuestions(ctx context.Context, testID int64, d
 func (u *testSeriesUsecase) GetQuestionsByTestID(ctx context.Context, testID int64) ([]domain.Question, error) {
 	return u.repo.GetQuestionsByTestID(ctx, testID)
 }
+
+func (u *testSeriesUsecase) UpdateTestSeries(ctx context.Context, id int64, ts *domain.TestSeries) error {
+	return u.repo.UpdateTestSeries(ctx, id, ts)
+}
+
+func (u *testSeriesUsecase) DeleteTestSeries(ctx context.Context, id int64) error {
+	return u.repo.DeleteTestSeries(ctx, id)
+}
+

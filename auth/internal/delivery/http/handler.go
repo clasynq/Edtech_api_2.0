@@ -408,8 +408,13 @@ func (h *HttpHandler) UnfollowUser(c *gin.Context) {
 
 func (h *HttpHandler) GetNotifications(c *gin.Context) {
 	userID, _ := c.Get("userID")
+	roleVal, exists := c.Get("role")
+	role := "student"
+	if exists {
+		role = roleVal.(string)
+	}
 
-	res, err := h.usecase.GetNotifications(c.Request.Context(), userID.(int64))
+	res, err := h.usecase.GetNotifications(c.Request.Context(), userID.(int64), role)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "An error occurred.", "detail": err.Error()})
 		return
@@ -420,8 +425,13 @@ func (h *HttpHandler) GetNotifications(c *gin.Context) {
 
 func (h *HttpHandler) MarkNotificationsAsRead(c *gin.Context) {
 	userID, _ := c.Get("userID")
+	roleVal, exists := c.Get("role")
+	role := "student"
+	if exists {
+		role = roleVal.(string)
+	}
 
-	err := h.usecase.MarkNotificationsAsRead(c.Request.Context(), userID.(int64))
+	err := h.usecase.MarkNotificationsAsRead(c.Request.Context(), userID.(int64), role)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "An error occurred.", "detail": err.Error()})
 		return
