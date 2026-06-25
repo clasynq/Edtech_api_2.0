@@ -21,45 +21,68 @@ func NewPostgresNoteRepository(db *gorm.DB) domain.NoteRepository {
 
 func (r *postgresNoteRepository) GetNotes(ctx context.Context, filters map[string]string) ([]domain.Note, error) {
 	var notes []domain.Note
-	query := r.db.WithContext(ctx).Model(&domain.Note{})
+	query := r.db.WithContext(ctx).Model(&domain.Note{}).
+		Select("notes.*, courses.course_name AS course_name").
+		Joins("LEFT JOIN courses ON notes.course_id = courses.id")
 
 	if category, ok := filters["category"]; ok && category != "" {
-		query = query.Where("category = ?", category)
+		query = query.Where("notes.category = ?", category)
 	}
 
 	if courseIDStr, ok := filters["courseId"]; ok && courseIDStr != "" {
 		if courseID, err := strconv.ParseInt(courseIDStr, 10, 64); err == nil {
-			query = query.Where("course_id = ?", courseID)
+			query = query.Where("notes.course_id = ?", courseID)
 		}
 	}
 
 	if batchID, ok := filters["batchId"]; ok && batchID != "" {
-		query = query.Where("batch_id = ?", batchID)
+		query = query.Where("notes.batch_id = ?", batchID)
 	}
 
 	if isFreeStr, ok := filters["isFree"]; ok && isFreeStr != "" {
 		if isFree, err := strconv.ParseBool(isFreeStr); err == nil {
-			query = query.Where("is_free = ?", isFree)
+			query = query.Where("notes.is_free = ?", isFree)
+		}
+	}
+
+	if noteType, ok := filters["noteType"]; ok && noteType != "" {
+		query = query.Where("notes.note_type = ?", noteType)
+	}
+
+	if courseIDsStr, ok := filters["courseIds"]; ok && courseIDsStr != "" {
+		parts := strings.Split(courseIDsStr, ",")
+		var ids []int64
+		for _, p := range parts {
+			if id, err := strconv.ParseInt(p, 10, 64); err == nil {
+				ids = append(ids, id)
+			}
+		}
+		if len(ids) > 0 {
+			query = query.Where("notes.course_id IN ?", ids)
+		} else {
+			query = query.Where("1 = 0")
 		}
 	}
 
 	if search, ok := filters["search"]; ok && search != "" {
 		searchParam := "%" + strings.ToLower(search) + "%"
-		query = query.Where("LOWER(title) LIKE ? OR LOWER(description) LIKE ?", searchParam, searchParam)
+		query = query.Where("LOWER(notes.title) LIKE ? OR LOWER(notes.description) LIKE ?", searchParam, searchParam)
 	}
 
-	err := query.Order("created_at DESC").Find(&notes).Error
+	err := query.Order("notes.created_at DESC").Find(&notes).Error
 	return notes, err
 }
 
 func (r *postgresNoteRepository) GetNoteByIDOrSlug(ctx context.Context, idOrSlug string) (*domain.Note, error) {
 	var note domain.Note
-	query := r.db.WithContext(ctx).Model(&domain.Note{})
+	query := r.db.WithContext(ctx).Model(&domain.Note{}).
+		Select("notes.*, courses.course_name AS course_name").
+		Joins("LEFT JOIN courses ON notes.course_id = courses.id")
 
 	if id, err := strconv.ParseInt(idOrSlug, 10, 64); err == nil {
-		query = query.Where("id = ?", id)
+		query = query.Where("notes.id = ?", id)
 	} else {
-		query = query.Where("slug = ?", idOrSlug)
+		query = query.Where("notes.slug = ?", idOrSlug)
 	}
 
 	if err := query.First(&note).Error; err != nil {
@@ -114,4 +137,12 @@ func (r *postgresNoteRepository) IsStudentEnrolledInCourse(ctx context.Context, 
 		return false, err
 	}
 	return count > 0, nil
+}
+
+func (r *postgresNoteRepository) GetEnrolledCourseIDs(ctx context.Context, studentID int64) ([]int64, error) {
+	var courseIDs []int64
+	err := r.db.WithContext(ctx).Table("enrollments").
+		Where("student_id = ?", studentID).
+		Pluck("course_id", &courseIDs).Error
+	return courseIDs, err
 }

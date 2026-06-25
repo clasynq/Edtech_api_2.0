@@ -272,6 +272,7 @@ type EnrollmentRepository interface {
 	CreateWebhookEvent(ctx context.Context, event *WebhookEvent) error
 
 	CreateAuditLog(ctx context.Context, log *PaymentAuditLog) error
+	GetMyEnrollments(ctx context.Context, studentID int64, category string) ([]map[string]interface{}, error)
 }
 
 type EnrollmentUsecase interface {
@@ -281,4 +282,5 @@ type EnrollmentUsecase interface {
 	HandleWebhook(ctx context.Context, rawBody []byte, signature string) error
 	RefundOrder(ctx context.Context, orderID int64) error
 	ProcessPendingReferrals(ctx context.Context) error
+	GetMyEnrollments(ctx context.Context, userID int64, category string) ([]map[string]interface{}, error)
 }

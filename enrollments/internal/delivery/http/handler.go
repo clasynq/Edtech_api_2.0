@@ -21,22 +21,53 @@ func RegisterRoutes(
 ) {
 	handler := &enrollmentHandler{uc: uc}
 
-	// Webhook endpoint (unauthenticated, Razorpay calls directly)
+	// Webhook endpoints (unauthenticated, Razorpay calls directly)
 	r.POST("/api/payments/webhook/", handler.HandleWebhook)
+	r.POST("/api/payments/webhook", handler.HandleWebhook)
+	r.POST("/payment/webhook/", handler.HandleWebhook)
+	r.POST("/payment/webhook", handler.HandleWebhook)
 
-	// Authenticated payment routes
-	auth := r.Group("/api/payments", authMiddleware)
+	// Authenticated payment routes (/api/payments)
+	authAPI := r.Group("/api/payments", authMiddleware)
 	{
-		auth.POST("/referral/validate/", handler.ValidateReferral)
-		auth.POST("/order/", handler.CreateOrder)
-		auth.POST("/verify/", handler.VerifyPayment)
-		auth.POST("/order/:id/refund/", AdminRequired(), handler.RefundOrder)
+		authAPI.POST("/referral/validate/", handler.ValidateReferral)
+		authAPI.POST("/referral/validate", handler.ValidateReferral)
+		authAPI.POST("/order/", handler.CreateOrder)
+		authAPI.POST("/order", handler.CreateOrder)
+		authAPI.POST("/verify/", handler.VerifyPayment)
+		authAPI.POST("/verify", handler.VerifyPayment)
+		authAPI.POST("/order/:id/refund/", AdminRequired(), handler.RefundOrder)
+		authAPI.POST("/order/:id/refund", AdminRequired(), handler.RefundOrder)
 
 		// Compatibility paths for Notes and Test Series payments
-		auth.POST("/notes/:id/order/create/", handler.CreateNoteOrder)
-		auth.POST("/notes/:id/order/verify/", handler.VerifyPayment)
-		auth.POST("/test-series/:id/order/create/", handler.CreateTestSeriesOrder)
-		auth.POST("/test-series/:id/order/verify/", handler.VerifyPayment)
+		authAPI.POST("/notes/:id/order/create/", handler.CreateNoteOrder)
+		authAPI.POST("/notes/:id/order/create", handler.CreateNoteOrder)
+		authAPI.POST("/notes/:id/order/verify/", handler.VerifyPayment)
+		authAPI.POST("/notes/:id/order/verify", handler.VerifyPayment)
+		authAPI.POST("/test-series/:id/order/create/", handler.CreateTestSeriesOrder)
+		authAPI.POST("/test-series/:id/order/create", handler.CreateTestSeriesOrder)
+		authAPI.POST("/test-series/:id/order/verify/", handler.VerifyPayment)
+		authAPI.POST("/test-series/:id/order/verify", handler.VerifyPayment)
+	}
+
+	// Authenticated legacy payment routes (/payment)
+	authPayment := r.Group("/payment", authMiddleware)
+	{
+		authPayment.POST("/order/create/", handler.CreateOrder)
+		authPayment.POST("/order/create", handler.CreateOrder)
+		authPayment.POST("/order/verify/", handler.VerifyPayment)
+		authPayment.POST("/order/verify", handler.VerifyPayment)
+		authPayment.POST("/order/validate-referral/", handler.ValidateReferral)
+		authPayment.POST("/order/validate-referral", handler.ValidateReferral)
+		authPayment.POST("/orders/:id/refund/", AdminRequired(), handler.RefundOrder)
+		authPayment.POST("/orders/:id/refund", AdminRequired(), handler.RefundOrder)
+	}
+
+	// Study Dashboard Enrollments
+	me := r.Group("/api/me", authMiddleware)
+	{
+		me.GET("/enrollments/", handler.GetMyEnrollments)
+		me.GET("/enrollments", handler.GetMyEnrollments)
 	}
 }
 
@@ -216,6 +247,25 @@ func (h *enrollmentHandler) CreateTestSeriesOrder(c *gin.Context) {
 	userAgent := c.Request.UserAgent()
 
 	res, err := h.uc.CreateOrder(c.Request.Context(), buyerID, buyerIP, userAgent, req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, res)
+}
+
+func (h *enrollmentHandler) GetMyEnrollments(c *gin.Context) {
+	userIDVal, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"detail": "Authentication required"})
+		return
+	}
+	userID := userIDVal.(int64)
+
+	category := c.Query("category")
+
+	res, err := h.uc.GetMyEnrollments(c.Request.Context(), userID, category)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
 		return

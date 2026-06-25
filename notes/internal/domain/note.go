@@ -21,6 +21,11 @@ type Note struct {
 	PageCount   int       `gorm:"column:page_count;type:integer;default:0" json:"pageCount"`
 	Category    string    `gorm:"column:category;type:varchar(100);not null" json:"category"`
 	Slug        string    `gorm:"column:slug;type:varchar(100)" json:"slug"`
+
+	// Virtual fields populated dynamically
+	CourseName  string    `gorm:"column:course_name;<-:false" json:"courseName"`
+	IsUnlocked  bool      `gorm:"-" json:"isUnlocked"`
+	SVGPageURLs []string  `gorm:"-" json:"svgPageUrls"`
 }
 
 func (Note) TableName() string {
@@ -70,12 +75,14 @@ type NoteRepository interface {
 	DeleteNote(ctx context.Context, id int64) error
 
 	GetStudentByUserID(ctx context.Context, userID int64) (*Student, error)
+	GetEnrolledCourseIDs(ctx context.Context, studentID int64) ([]int64, error)
 	HasNoteAccess(ctx context.Context, studentID, noteID int64) (bool, error)
 	IsStudentEnrolledInCourse(ctx context.Context, studentID, courseID int64) (bool, error)
 }
 
 type NoteUsecase interface {
 	GetNotes(ctx context.Context, userID int64, role string, filters map[string]string) ([]Note, error)
+	GetClassNotes(ctx context.Context, userID int64, role string, filters map[string]string) ([]Note, error)
 	GetNoteByIDOrSlug(ctx context.Context, userID int64, role string, idOrSlug string) (*Note, bool, error)
 	CreateNote(ctx context.Context, note *Note) error
 	UpdateNote(ctx context.Context, idOrSlug string, updates map[string]interface{}) (*Note, error)

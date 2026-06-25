@@ -61,6 +61,7 @@ func AuthMiddleware(secretKey string, rdb *redis.Client) gin.HandlerFunc {
 		tokenStr := tokenParts[1]
 		claims, err := VerifyToken(tokenStr, secretKey)
 		if err != nil {
+			fmt.Printf("[Auth] Token verification failed: %v\n", err)
 			c.JSON(http.StatusUnauthorized, gin.H{"detail": "Given token not valid for any token type."})
 			c.Abort()
 			return

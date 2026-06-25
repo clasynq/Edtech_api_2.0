@@ -407,6 +407,7 @@ func (u *enrollmentUsecase) CreateOrder(ctx context.Context, buyerID int64, buye
 		}
 
 		return map[string]interface{}{
+			"isFree":         true,
 			"freeOrder":      true,
 			"paymentOrderId": order.ID,
 			"status":         "completed",
@@ -438,16 +439,28 @@ func (u *enrollmentUsecase) CreateOrder(ctx context.Context, buyerID int64, buye
 		return nil, err
 	}
 
-	return map[string]interface{}{
+	resp := map[string]interface{}{
+		"isFree":          false,
 		"freeOrder":       false,
 		"paymentOrderId":  order.ID,
+		"orderId":         rzpOrderID,
 		"razorpayOrderId": rzpOrderID,
 		"amount":          int(finalPrice * 100), // in paise for checkout
 		"currency":        "INR",
 		"keyId":           u.keyID,
-		"name":            "ClaSynq EdTech",
+		"name":            "ClaSynq",
 		"description":     fmt.Sprintf("Purchase %s", title),
-	}, nil
+	}
+
+	if orderType == "course" {
+		resp["courseName"] = title
+	} else if orderType == "note" {
+		resp["noteTitle"] = title
+	} else if orderType == "test_series" {
+		resp["testSeriesTitle"] = title
+	}
+
+	return resp, nil
 }
 
 func (u *enrollmentUsecase) createRazorpayOrder(amount float64, receipt string) (string, error) {
@@ -494,12 +507,23 @@ func (u *enrollmentUsecase) createRazorpayOrder(amount float64, receipt string) 
 }
 
 func (u *enrollmentUsecase) VerifyPayment(ctx context.Context, buyerID int64, req map[string]interface{}) (map[string]interface{}, error) {
+	log.Printf("[VerifyPayment] Received request for buyerID=%d: %+v", buyerID, req)
 	rzpOrderID, ok1 := req["razorpayOrderId"].(string)
+	if !ok1 {
+		rzpOrderID, ok1 = req["razorpay_order_id"].(string)
+	}
 	rzpPaymentID, ok2 := req["razorpayPaymentId"].(string)
+	if !ok2 {
+		rzpPaymentID, ok2 = req["razorpay_payment_id"].(string)
+	}
 	rzpSignature, ok3 := req["razorpaySignature"].(string)
+	if !ok3 {
+		rzpSignature, ok3 = req["razorpay_signature"].(string)
+	}
 
 	if !ok1 || !ok2 || !ok3 {
-		return nil, errors.New("missing required payment parameters: razorpayOrderId, razorpayPaymentId, razorpaySignature")
+		log.Printf("[VerifyPayment] Missing parameters. ok1=%t, ok2=%t, ok3=%t, keys present: %+v", ok1, ok2, ok3, req)
+		return nil, errors.New("missing required payment parameters: razorpayOrderId/razorpay_order_id, razorpayPaymentId/razorpay_payment_id, razorpaySignature/razorpay_signature")
 	}
 
 	// Verify Payment Signature
@@ -507,22 +531,27 @@ func (u *enrollmentUsecase) VerifyPayment(ctx context.Context, buyerID int64, re
 	mac.Write([]byte(rzpOrderID + "|" + rzpPaymentID))
 	expectedSignature := hex.EncodeToString(mac.Sum(nil))
 
+	log.Printf("[VerifyPayment] Signature check: expected=%s, received=%s", expectedSignature, rzpSignature)
 	if subtle.ConstantTimeCompare([]byte(rzpSignature), []byte(expectedSignature)) != 1 {
+		log.Printf("[VerifyPayment] Signature verification failed")
 		return nil, errors.New("payment signature verification failed")
 	}
 
 	// Process transactionally
 	txRepo, err := u.repo.BeginTx(ctx)
 	if err != nil {
+		log.Printf("[VerifyPayment] BeginTx error: %v", err)
 		return nil, err
 	}
 	defer txRepo.RollbackTx()
 
 	order, err := txRepo.GetPaymentOrderByRazorpayID(ctx, rzpOrderID)
 	if err != nil {
+		log.Printf("[VerifyPayment] GetPaymentOrderByRazorpayID error: %v", err)
 		return nil, err
 	}
 	if order == nil {
+		log.Printf("[VerifyPayment] Order not found for razorpayOrderID=%s", rzpOrderID)
 		return nil, errors.New("payment order not found")
 	}
 
@@ -533,9 +562,11 @@ func (u *enrollmentUsecase) VerifyPayment(ctx context.Context, buyerID int64, re
 
 	student, err := txRepo.GetStudentByUserID(ctx, order.UserID)
 	if err != nil {
+		log.Printf("[VerifyPayment] GetStudentByUserID error: %v", err)
 		return nil, err
 	}
 	if student == nil {
+		log.Printf("[VerifyPayment] Student not found for userID=%d", order.UserID)
 		return nil, errors.New("student not found for user")
 	}
 
@@ -543,18 +574,21 @@ func (u *enrollmentUsecase) VerifyPayment(ctx context.Context, buyerID int64, re
 	order.Status = "completed"
 	order.RazorpayPaymentID = &rzpPaymentID
 	if err := txRepo.UpdatePaymentOrder(ctx, order); err != nil {
+		log.Printf("[VerifyPayment] UpdatePaymentOrder error: %v", err)
 		return nil, err
 	}
 
 	// Deduct coins if they were used
 	if order.CoinsRedeemed > 0 {
 		if err := txRepo.UpdateUserCoins(ctx, order.UserID, -order.CoinsRedeemed); err != nil {
+			log.Printf("[VerifyPayment] UpdateUserCoins error: %v", err)
 			return nil, err
 		}
 	}
 
 	// Grant item access
 	if err := u.grantAccess(ctx, txRepo, student.ID, order); err != nil {
+		log.Printf("[VerifyPayment] grantAccess error: %v", err)
 		return nil, err
 	}
 
@@ -662,27 +696,29 @@ func (u *enrollmentUsecase) HandleWebhook(ctx context.Context, rawBody []byte, s
 		return err
 	}
 
-	eventID, ok := webhookPayload["id"].(string)
-	if !ok {
-		return errors.New("missing id in webhook payload")
+	var eventID string
+	if idVal, ok := webhookPayload["id"]; ok && idVal != nil {
+		eventID, _ = idVal.(string)
 	}
 
 	eventType, _ := webhookPayload["event"].(string)
 
-	// 3. Idempotency Check
-	existingEvent, err := u.repo.GetWebhookEventByID(ctx, eventID)
-	if err != nil {
-		return err
-	}
-	if existingEvent != nil {
-		log.Printf("Webhook event %s already processed, skipping.", eventID)
-		return nil
-	}
+	// 3. Idempotency Check (only if eventID is provided)
+	if eventID != "" {
+		existingEvent, err := u.repo.GetWebhookEventByID(ctx, eventID)
+		if err != nil {
+			return err
+		}
+		if existingEvent != nil {
+			log.Printf("Webhook event %s already processed, skipping.", eventID)
+			return nil
+		}
 
-	// Insert event_id immediately to mark as processed
-	evtRecord := &domain.WebhookEvent{EventID: eventID, ProcessedAt: time.Now()}
-	if err := u.repo.CreateWebhookEvent(ctx, evtRecord); err != nil {
-		return err
+		// Insert event_id immediately to mark as processed
+		evtRecord := &domain.WebhookEvent{EventID: eventID, ProcessedAt: time.Now()}
+		if err := u.repo.CreateWebhookEvent(ctx, evtRecord); err != nil {
+			return err
+		}
 	}
 
 	// 4. Handle events
@@ -1026,4 +1062,15 @@ func (u *enrollmentUsecase) ProcessPendingReferrals(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (u *enrollmentUsecase) GetMyEnrollments(ctx context.Context, userID int64, category string) ([]map[string]interface{}, error) {
+	student, err := u.repo.GetStudentByUserID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if student == nil {
+		return []map[string]interface{}{}, nil
+	}
+	return u.repo.GetMyEnrollments(ctx, student.ID, category)
 }

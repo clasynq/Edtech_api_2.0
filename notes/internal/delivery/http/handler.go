@@ -38,10 +38,23 @@ func RegisterRoutes(
 	handler := NewHttpHandler(uc, mediaRoot, baseURL)
 
 	r.GET("/api/notes/", optionalAuthMiddleware, handler.GetNotes)
+	r.GET("/api/notes/public/", optionalAuthMiddleware, handler.GetPublicNotes)
+	r.GET("/api/notes/public", optionalAuthMiddleware, handler.GetPublicNotes)
+	r.GET("/api/notes/class-related/", optionalAuthMiddleware, handler.GetClassNotes)
+	r.GET("/api/notes/class-related", optionalAuthMiddleware, handler.GetClassNotes)
 	r.GET("/api/notes/:id", optionalAuthMiddleware, handler.GetNoteDetails)
 
 	auth := r.Group("/api/notes", authMiddleware)
 	{
+		auth.GET("/admin/", AdminOrTeacherRequired(), handler.GetAdminNotes)
+		auth.GET("/admin", AdminOrTeacherRequired(), handler.GetAdminNotes)
+		auth.POST("/admin/", AdminOrTeacherRequired(), handler.CreateNote)
+		auth.POST("/admin", AdminOrTeacherRequired(), handler.CreateNote)
+		auth.PUT("/admin/:id/", AdminOrTeacherRequired(), handler.UpdateNote)
+		auth.PUT("/admin/:id", AdminOrTeacherRequired(), handler.UpdateNote)
+		auth.DELETE("/admin/:id/", AdminOrTeacherRequired(), handler.DeleteNote)
+		auth.DELETE("/admin/:id", AdminOrTeacherRequired(), handler.DeleteNote)
+
 		auth.POST("/", AdminOrTeacherRequired(), handler.CreateNote)
 		auth.PUT("/:id", AdminOrTeacherRequired(), handler.UpdateNote)
 		auth.DELETE("/:id", AdminOrTeacherRequired(), handler.DeleteNote)
@@ -292,4 +305,77 @@ func (h *httpHandler) CheckAccess(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"hasAccess": hasAccess,
 	})
+}
+
+func (h *httpHandler) GetPublicNotes(c *gin.Context) {
+	filters := map[string]string{
+		"noteType": "public",
+		"category": c.Query("category"),
+		"search":   c.Query("search"),
+	}
+
+	userID := int64(0)
+	role := ""
+	if uIDVal, exists := c.Get("userID"); exists {
+		userID = uIDVal.(int64)
+	}
+	if rVal, exists := c.Get("role"); exists {
+		role = rVal.(string)
+	}
+
+	notes, err := h.uc.GetNotes(c.Request.Context(), userID, role, filters)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, notes)
+}
+
+func (h *httpHandler) GetClassNotes(c *gin.Context) {
+	filters := map[string]string{
+		"category": c.Query("category"),
+		"search":   c.Query("search"),
+	}
+
+	userID := int64(0)
+	role := ""
+	if uIDVal, exists := c.Get("userID"); exists {
+		userID = uIDVal.(int64)
+	}
+	if rVal, exists := c.Get("role"); exists {
+		role = rVal.(string)
+	}
+
+	notes, err := h.uc.GetClassNotes(c.Request.Context(), userID, role, filters)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, notes)
+}
+
+func (h *httpHandler) GetAdminNotes(c *gin.Context) {
+	filters := map[string]string{
+		"category": c.Query("category"),
+		"search":   c.Query("search"),
+	}
+
+	userID := int64(0)
+	role := ""
+	if uIDVal, exists := c.Get("userID"); exists {
+		userID = uIDVal.(int64)
+	}
+	if rVal, exists := c.Get("role"); exists {
+		role = rVal.(string)
+	}
+
+	notes, err := h.uc.GetNotes(c.Request.Context(), userID, role, filters)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, notes)
 }

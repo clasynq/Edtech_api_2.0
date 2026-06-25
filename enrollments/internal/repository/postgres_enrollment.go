@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"clasynq/api/enrollments/internal/domain"
 
@@ -117,14 +118,14 @@ func (r *postgresEnrollmentRepository) GetTestSeriesByID(ctx context.Context, id
 }
 
 func (r *postgresEnrollmentRepository) GetEnrollment(ctx context.Context, studentID, courseID int64) (*domain.Enrollment, error) {
-	var enrollment domain.Enrollment
-	if err := r.db.WithContext(ctx).Where("student_id = ? AND course_id = ?", studentID, courseID).First(&enrollment).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
+	var enrollments []domain.Enrollment
+	if err := r.db.WithContext(ctx).Where("student_id = ? AND course_id = ?", studentID, courseID).Limit(1).Find(&enrollments).Error; err != nil {
 		return nil, err
 	}
-	return &enrollment, nil
+	if len(enrollments) == 0 {
+		return nil, nil
+	}
+	return &enrollments[0], nil
 }
 
 func (r *postgresEnrollmentRepository) CreateEnrollment(ctx context.Context, enrollment *domain.Enrollment) error {
@@ -136,14 +137,14 @@ func (r *postgresEnrollmentRepository) DeleteEnrollment(ctx context.Context, stu
 }
 
 func (r *postgresEnrollmentRepository) GetNoteAccess(ctx context.Context, studentID, noteID int64) (*domain.NoteAccess, error) {
-	var access domain.NoteAccess
-	if err := r.db.WithContext(ctx).Where("student_id = ? AND note_id = ?", studentID, noteID).First(&access).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
+	var accesses []domain.NoteAccess
+	if err := r.db.WithContext(ctx).Where("student_id = ? AND note_id = ?", studentID, noteID).Limit(1).Find(&accesses).Error; err != nil {
 		return nil, err
 	}
-	return &access, nil
+	if len(accesses) == 0 {
+		return nil, nil
+	}
+	return &accesses[0], nil
 }
 
 func (r *postgresEnrollmentRepository) CreateNoteAccess(ctx context.Context, access *domain.NoteAccess) error {
@@ -155,14 +156,14 @@ func (r *postgresEnrollmentRepository) DeleteNoteAccess(ctx context.Context, stu
 }
 
 func (r *postgresEnrollmentRepository) GetTestSeriesAccess(ctx context.Context, studentID, testSeriesID int64) (*domain.TestSeriesAccess, error) {
-	var access domain.TestSeriesAccess
-	if err := r.db.WithContext(ctx).Where("student_id = ? AND test_series_id = ?", studentID, testSeriesID).First(&access).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
+	var accesses []domain.TestSeriesAccess
+	if err := r.db.WithContext(ctx).Where("student_id = ? AND test_series_id = ?", studentID, testSeriesID).Limit(1).Find(&accesses).Error; err != nil {
 		return nil, err
 	}
-	return &access, nil
+	if len(accesses) == 0 {
+		return nil, nil
+	}
+	return &accesses[0], nil
 }
 
 func (r *postgresEnrollmentRepository) CreateTestSeriesAccess(ctx context.Context, access *domain.TestSeriesAccess) error {
@@ -292,4 +293,84 @@ func (r *postgresEnrollmentRepository) CreateWebhookEvent(ctx context.Context, e
 
 func (r *postgresEnrollmentRepository) CreateAuditLog(ctx context.Context, log *domain.PaymentAuditLog) error {
 	return r.db.WithContext(ctx).Create(log).Error
+}
+
+func (r *postgresEnrollmentRepository) GetMyEnrollments(ctx context.Context, studentID int64, category string) ([]map[string]interface{}, error) {
+	type Result struct {
+		EnrollmentID   int64     `gorm:"column:enrollment_id"`
+		CreatedAt      time.Time `gorm:"column:created_at"`
+		CourseID       int64     `gorm:"column:course_id"`
+		CourseName     string    `gorm:"column:course_name"`
+		BatchID        string    `gorm:"column:batch_id"`
+		Category       string    `gorm:"column:category"`
+		BannerURL      string    `gorm:"column:banner_url"`
+		FinalPrice     float64   `gorm:"column:final_price"`
+		TeacherID      *int64    `gorm:"column:teacher_id"`
+	}
+
+	var results []Result
+	query := r.db.WithContext(ctx).Table("enrollments e").
+		Select("e.id AS enrollment_id, e.created_at, c.id AS course_id, c.course_name, c.batch_id, c.category, c.banner_url, c.final_price, c.teacher_id").
+		Joins("JOIN courses c ON e.course_id = c.id").
+		Where("e.student_id = ?", studentID)
+
+	if category != "" {
+		query = query.Where("c.category = ?", category)
+	}
+
+	if err := query.Find(&results).Error; err != nil {
+		return nil, err
+	}
+
+	data := make([]map[string]interface{}, 0)
+	for _, res := range results {
+		mentorName := "Instructor"
+
+		// 1. Check direct teacher_id first
+		if res.TeacherID != nil {
+			var tName string
+			err := r.db.WithContext(ctx).Table("teachers").Select("name").Where("id = ?", *res.TeacherID).Row().Scan(&tName)
+			if err == nil && tName != "" {
+				mentorName = tName
+			}
+		}
+
+		// 2. Check ManyToMany course_teachers table (usually courses_teachers in Django)
+		var m2mNames []string
+		err := r.db.WithContext(ctx).Table("teachers t").
+			Select("t.name").
+			Joins("JOIN courses_teachers ct ON t.id = ct.teacher_id").
+			Where("ct.course_id = ?", res.CourseID).
+			Find(&m2mNames).Error
+
+		if err == nil && len(m2mNames) > 0 {
+			mentorName = strings.Join(m2mNames, ", ")
+		}
+
+		enrolledOn := "Recently"
+		if !res.CreatedAt.IsZero() {
+			enrolledOn = res.CreatedAt.Format("January 02, 2006")
+		}
+
+		item := map[string]interface{}{
+			"id":               res.EnrollmentID,
+			"slug":             res.BatchID,
+			"title":            res.CourseName,
+			"category":         res.Category,
+			"level":            "All levels",
+			"mentor":           mentorName,
+			"enrolledOn":       enrolledOn,
+			"lastAccessed":     "Just now",
+			"progressPercent":  0,
+			"modulesCompleted": 0,
+			"modulesTotal":     12,
+			"nextLesson":       "Introduction Session",
+			"batchId":          res.BatchID,
+			"bannerUrl":        res.BannerURL,
+			"finalPrice":       res.FinalPrice,
+		}
+		data = append(data, item)
+	}
+
+	return data, nil
 }

@@ -4,18 +4,25 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"math/big"
+	"strconv"
+	"strings"
 	"time"
 
 	"clasynq/api/notes/internal/domain"
 )
 
 type noteUsecase struct {
-	repo domain.NoteRepository
+	repo    domain.NoteRepository
+	baseURL string
 }
 
-func NewNoteUsecase(repo domain.NoteRepository) domain.NoteUsecase {
-	return &noteUsecase{repo: repo}
+func NewNoteUsecase(repo domain.NoteRepository, baseURL string) domain.NoteUsecase {
+	return &noteUsecase{
+		repo:    repo,
+		baseURL: baseURL,
+	}
 }
 
 func (u *noteUsecase) GetNotes(ctx context.Context, userID int64, role string, filters map[string]string) ([]domain.Note, error) {
@@ -29,10 +36,52 @@ func (u *noteUsecase) GetNotes(ctx context.Context, userID int64, role string, f
 		hasAccess, err := u.checkAccess(ctx, userID, role, &notes[i])
 		if err != nil || !hasAccess {
 			notes[i].FileURL = "" // mask URL
+			notes[i].IsUnlocked = false
+		} else {
+			notes[i].IsUnlocked = true
 		}
+		u.populateSVGPageURLs(&notes[i])
 	}
 
 	return notes, nil
+}
+
+func (u *noteUsecase) GetClassNotes(ctx context.Context, userID int64, role string, filters map[string]string) ([]domain.Note, error) {
+	// If role is admin or teacher, they see all class notes
+	if role == "admin" || role == "teacher" {
+		filters["noteType"] = "class"
+		return u.GetNotes(ctx, userID, role, filters)
+	}
+
+	// For student, they only see notes from courses they are enrolled in
+	if userID <= 0 {
+		return []domain.Note{}, nil
+	}
+
+	student, err := u.repo.GetStudentByUserID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if student == nil {
+		return []domain.Note{}, nil
+	}
+
+	courseIDs, err := u.repo.GetEnrolledCourseIDs(ctx, student.ID)
+	if err != nil {
+		return nil, err
+	}
+	if len(courseIDs) == 0 {
+		return []domain.Note{}, nil
+	}
+
+	var idStrs []string
+	for _, id := range courseIDs {
+		idStrs = append(idStrs, strconv.FormatInt(id, 10))
+	}
+	filters["courseIds"] = strings.Join(idStrs, ",")
+	filters["noteType"] = "class"
+
+	return u.GetNotes(ctx, userID, role, filters)
 }
 
 func (u *noteUsecase) GetNoteByIDOrSlug(ctx context.Context, userID int64, role string, idOrSlug string) (*domain.Note, bool, error) {
@@ -49,9 +98,11 @@ func (u *noteUsecase) GetNoteByIDOrSlug(ctx context.Context, userID int64, role 
 		return nil, false, err
 	}
 
+	note.IsUnlocked = hasAccess
 	if !hasAccess {
 		note.FileURL = "" // mask URL
 	}
+	u.populateSVGPageURLs(note)
 
 	return note, hasAccess, nil
 }
@@ -241,4 +292,16 @@ func (u *noteUsecase) generateUniqueSlug(ctx context.Context) (string, error) {
 		}
 	}
 	return "", errors.New("failed to generate unique slug")
+}
+
+func (u *noteUsecase) populateSVGPageURLs(note *domain.Note) {
+	if !note.IsUnlocked || !note.HasSvgs || note.PageCount <= 0 {
+		note.SVGPageURLs = []string{}
+		return
+	}
+	urls := make([]string, note.PageCount)
+	for i := 1; i <= note.PageCount; i++ {
+		urls[i-1] = fmt.Sprintf("%s/media/notes/note_%d_pages/page_%d.svg", u.baseURL, note.ID, i)
+	}
+	note.SVGPageURLs = urls
 }

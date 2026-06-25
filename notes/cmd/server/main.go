@@ -58,7 +58,7 @@ func main() {
 
 	// 5. Initialize Layers
 	repo := repository.NewPostgresNoteRepository(db)
-	uc := usecase.NewNoteUsecase(repo)
+	uc := usecase.NewNoteUsecase(repo, cfg.BaseURL)
 	authMiddleware := delivery.AuthMiddleware(cfg.SecretKey, rdb)
 	optionalAuthMiddleware := delivery.OptionalAuthMiddleware(cfg.SecretKey)
 
