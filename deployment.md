@@ -311,6 +311,7 @@ server {
     add_header Access-Control-Allow-Credentials 'true' always;
     add_header Access-Control-Allow-Methods 'GET, POST, PUT, DELETE, OPTIONS, PATCH' always;
     add_header Access-Control-Allow-Headers 'Authorization, Content-Type, X-User-Tier, X-Turnstile-Token' always;
+    add_header Access-Control-Max-Age 86400 always;
 
     # Handle OPTIONS preflight requests globally
     if ($request_method = 'OPTIONS') {
