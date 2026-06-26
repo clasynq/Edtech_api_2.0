@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -302,4 +303,344 @@ func (u *profileUsecase) ToggleFollowUser(ctx context.Context, followerID, follo
 	}
 
 	return isFollowing, nil
+}
+
+func (u *profileUsecase) GetStudyDashboard(ctx context.Context, userID int64, category string) (map[string]interface{}, error) {
+	// 1. Get student profile
+	student, err := u.repo.GetStudentByUserID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if student == nil {
+		return map[string]interface{}{
+			"enrolledCourses": []interface{}{},
+			"upcomingClasses": []interface{}{},
+			"liveClass":       nil,
+		}, nil
+	}
+
+	// 2. Get enrollments
+	enrollments, err := u.repo.GetEnrollmentsByStudentID(ctx, student.ID)
+	if err != nil {
+		return nil, err
+	}
+	if len(enrollments) == 0 {
+		return map[string]interface{}{
+			"enrolledCourses": []interface{}{},
+			"upcomingClasses": []interface{}{},
+			"liveClass":       nil,
+		}, nil
+	}
+
+	courseIDs := make([]int64, len(enrollments))
+	for i, e := range enrollments {
+		courseIDs[i] = e.CourseID
+	}
+
+	// 3. Get enrolled courses
+	courses, err := u.repo.GetCoursesByIDs(ctx, courseIDs, category)
+	if err != nil {
+		return nil, err
+	}
+	if len(courses) == 0 {
+		return map[string]interface{}{
+			"enrolledCourses": []interface{}{},
+			"upcomingClasses": []interface{}{},
+			"liveClass":       nil,
+		}, nil
+	}
+
+	// Re-filter courseIDs for category filtering if active
+	filteredCourseIDs := make([]int64, len(courses))
+	coursesData := make([]map[string]interface{}, len(courses))
+	for i, c := range courses {
+		filteredCourseIDs[i] = c.ID
+		teacherName := "Instructor"
+		if len(c.Teachers) > 0 {
+			names := make([]string, len(c.Teachers))
+			for j, t := range c.Teachers {
+				names[j] = t.Name
+			}
+			teacherName = strings.Join(names, ", ")
+		} else if c.Teacher != nil {
+			teacherName = c.Teacher.Name
+		}
+
+		coursesData[i] = map[string]interface{}{
+			"id":          c.ID,
+			"courseName":  c.CourseName,
+			"batchId":     c.BatchID,
+			"bannerUrl":   c.BannerURL,
+			"meetingLink": c.MeetingLink,
+			"teacherName": teacherName,
+			"category":    c.Category,
+		}
+	}
+
+	// 4. Get class schedules for the next 7 days
+	now := time.Now()
+	// Clean up local time to date
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	endOfWeek := today.AddDate(0, 0, 7)
+
+	schedules, err := u.repo.GetClassSchedulesByCourseIDsAndDateRange(ctx, filteredCourseIDs, today, endOfWeek)
+	if err != nil {
+		return nil, err
+	}
+
+	// Filter schedules using the same rescheduling/cancellation skip-logic from Django monolith
+	// Build map of completed/cancelled topics per course per day
+	completedOrCancelled := make(map[string]bool)
+	for _, s := range schedules {
+		if s.ClassStatus == "completed" || s.ClassStatus == "cancelled" {
+			tDate := time.Time(s.ClassDate)
+			key := fmt.Sprintf("%d:%s:%s", s.CourseID, tDate.Format("2006-01-02"), strings.TrimSpace(strings.ToLower(s.TopicName)))
+			completedOrCancelled[key] = true
+		}
+	}
+
+	upcomingClasses := make([]map[string]interface{}, 0)
+	var liveClass map[string]interface{}
+
+	for _, s := range schedules {
+		tDate := time.Time(s.ClassDate)
+		key := fmt.Sprintf("%d:%s:%s", s.CourseID, tDate.Format("2006-01-02"), strings.TrimSpace(strings.ToLower(s.TopicName)))
+		if completedOrCancelled[key] && (s.ClassStatus == "pending" || s.ClassStatus == "rescheduled") {
+			continue
+		}
+
+		// Fallback for subjectName
+		subjectName := ""
+		if s.Subject != nil {
+			subjectName = s.Subject.SubjectName
+		} else if s.Course != nil && s.Teacher != nil && len(s.Course.TeacherSubjects) > 0 {
+			var teacherSubjects map[string][]int64
+			if err := json.Unmarshal(s.Course.TeacherSubjects, &teacherSubjects); err == nil {
+				teacherIDStr := fmt.Sprintf("%d", s.TeacherID)
+				if assignedIDs, ok := teacherSubjects[teacherIDStr]; ok && len(assignedIDs) > 0 {
+					for _, sub := range s.Course.Subjects {
+						if sub.ID == assignedIDs[0] {
+							subjectName = sub.SubjectName
+							break
+						}
+					}
+				}
+			}
+		}
+		if subjectName == "" && s.Course != nil && len(s.Course.Subjects) > 0 {
+			subjectName = s.Course.Subjects[0].SubjectName
+		}
+
+		// Fallback for meetingLink
+		meetingLink := ""
+		if s.Subject != nil && s.Subject.MeetingLink != "" {
+			meetingLink = s.Subject.MeetingLink
+		} else if s.Course != nil && s.Teacher != nil && len(s.Course.TeacherSubjects) > 0 {
+			var teacherSubjects map[string][]int64
+			if err := json.Unmarshal(s.Course.TeacherSubjects, &teacherSubjects); err == nil {
+				teacherIDStr := fmt.Sprintf("%d", s.TeacherID)
+				if assignedIDs, ok := teacherSubjects[teacherIDStr]; ok && len(assignedIDs) > 0 {
+					for _, sub := range s.Course.Subjects {
+						for _, aid := range assignedIDs {
+							if sub.ID == aid && sub.MeetingLink != "" {
+								meetingLink = sub.MeetingLink
+								break
+							}
+						}
+						if meetingLink != "" {
+							break
+						}
+					}
+				}
+			}
+		}
+		if meetingLink == "" && s.Course != nil {
+			for _, sub := range s.Course.Subjects {
+				if sub.MeetingLink != "" {
+					meetingLink = sub.MeetingLink
+					break
+				}
+			}
+			if meetingLink == "" {
+				meetingLink = s.Course.MeetingLink
+			}
+		}
+
+		teacherName := "Instructor"
+		if s.Teacher != nil {
+			teacherName = s.Teacher.Name
+		}
+
+		courseName := ""
+		if s.Course != nil {
+			courseName = s.Course.CourseName
+		}
+
+		classInfo := map[string]interface{}{
+			"id":               s.ID,
+			"topicName":        s.TopicName,
+			"classDate":        tDate.Format("2006-01-02"),
+			"startTime":        formatTimeStr(s.StartTime),
+			"endTime":          formatTimeStr(s.EndTime),
+			"status":           s.ClassStatus,
+			"courseName":       courseName,
+			"subjectName":      subjectName,
+			"meetingLink":      meetingLink,
+			"teacherName":      teacherName,
+			"batchId":          s.BatchID,
+			"classNotesUrl":    s.ClassNotesURL,
+			"recordedClassUrl": s.RecordedClassURL,
+		}
+
+		// Set liveClass if class is today and status is pending or rescheduled
+		// (Following Django matching exactly)
+		isToday := tDate.Year() == today.Year() && tDate.Month() == today.Month() && tDate.Day() == today.Day()
+		if isToday && (s.ClassStatus == "pending" || s.ClassStatus == "rescheduled") {
+			if liveClass == nil {
+				liveClass = classInfo
+			}
+		}
+
+		upcomingClasses = append(upcomingClasses, classInfo)
+	}
+
+	return map[string]interface{}{
+		"enrolledCourses": coursesData,
+		"upcomingClasses": upcomingClasses,
+		"liveClass":       liveClass,
+	}, nil
+}
+
+func (u *profileUsecase) GetHistory(ctx context.Context, userID int64, category string) (map[string]interface{}, error) {
+	// 1. Get student profile
+	student, err := u.repo.GetStudentByUserID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if student == nil {
+		return map[string]interface{}{"buckets": []interface{}{}}, nil
+	}
+
+	// 2. Get enrollments
+	enrollments, err := u.repo.GetEnrollmentsByStudentID(ctx, student.ID)
+	if err != nil {
+		return nil, err
+	}
+	if len(enrollments) == 0 {
+		return map[string]interface{}{"buckets": []interface{}{}}, nil
+	}
+
+	courseIDs := make([]int64, len(enrollments))
+	for i, e := range enrollments {
+		courseIDs[i] = e.CourseID
+	}
+
+	// 3. Filter courseIDs if category is provided
+	if category != "" {
+		courses, err := u.repo.GetCoursesByIDs(ctx, courseIDs, category)
+		if err != nil {
+			return nil, err
+		}
+		if len(courses) == 0 {
+			return map[string]interface{}{"buckets": []interface{}{}}, nil
+		}
+		courseIDs = make([]int64, len(courses))
+		for i, c := range courses {
+			courseIDs[i] = c.ID
+		}
+	}
+
+	// 4. Get completed schedules
+	schedules, err := u.repo.GetCompletedClassSchedulesByCourseIDs(ctx, courseIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	yesterday := today.AddDate(0, 0, -1)
+	weekAgo := today.AddDate(0, 0, -7)
+
+	todayEntries := make([]map[string]interface{}, 0)
+	yesterdayEntries := make([]map[string]interface{}, 0)
+	weekEntries := make([]map[string]interface{}, 0)
+	olderEntries := make([]map[string]interface{}, 0)
+
+	for _, s := range schedules {
+		tDate := time.Time(s.ClassDate)
+		subjectPart := ""
+		if s.Subject != nil {
+			subjectPart = " · " + s.Subject.SubjectName
+		}
+
+		courseName := ""
+		if s.Course != nil {
+			courseName = s.Course.CourseName
+		}
+
+		classNotesURL := ""
+		if s.ClassNotesURL != nil {
+			classNotesURL = *s.ClassNotesURL
+		}
+		toLink := classNotesURL
+		if toLink == "" {
+			toLink = "/dashboard/learning_corner/study"
+		}
+
+		entry := map[string]interface{}{
+			"id":      fmt.Sprintf("class-%d", s.ID),
+			"type":    "course-lesson",
+			"title":   s.TopicName,
+			"context": fmt.Sprintf("%s%s · %s", courseName, subjectPart, s.BatchID),
+			"time":    fmt.Sprintf("%s at %s", tDate.Format("Jan 02, 2006"), formatTimeStr(s.StartTime)),
+			"to":      toLink,
+			"meta": map[string]interface{}{
+				"duration": fmt.Sprintf("%s - %s", formatTimeStr(s.StartTime), formatTimeStr(s.EndTime)),
+			},
+		}
+
+		isToday := tDate.Year() == today.Year() && tDate.Month() == today.Month() && tDate.Day() == today.Day()
+		isYesterday := tDate.Year() == yesterday.Year() && tDate.Month() == yesterday.Month() && tDate.Day() == yesterday.Day()
+		isWeek := tDate.After(weekAgo) || tDate.Equal(weekAgo)
+
+		if isToday {
+			todayEntries = append(todayEntries, entry)
+		} else if isYesterday {
+			yesterdayEntries = append(yesterdayEntries, entry)
+		} else if isWeek {
+			weekEntries = append(weekEntries, entry)
+		} else {
+			olderEntries = append(olderEntries, entry)
+		}
+	}
+
+	buckets := make([]map[string]interface{}, 0)
+	if len(todayEntries) > 0 {
+		buckets = append(buckets, map[string]interface{}{"bucket": "Today", "entries": todayEntries})
+	}
+	if len(yesterdayEntries) > 0 {
+		buckets = append(buckets, map[string]interface{}{"bucket": "Yesterday", "entries": yesterdayEntries})
+	}
+	if len(weekEntries) > 0 {
+		buckets = append(buckets, map[string]interface{}{"bucket": "Earlier this week", "entries": weekEntries})
+	}
+	if len(olderEntries) > 0 {
+		buckets = append(buckets, map[string]interface{}{"bucket": "Earlier", "entries": olderEntries})
+	}
+
+	return map[string]interface{}{
+		"buckets": buckets,
+	}, nil
+}
+
+// helper to format TimeStr
+func formatTimeStr(tStr domain.TimeStr) string {
+	t, err := time.Parse("15:04:05", string(tStr))
+	if err != nil {
+		t, err = time.Parse("15:04", string(tStr))
+		if err != nil {
+			return string(tStr)
+		}
+	}
+	return t.Format("03:04 PM")
 }

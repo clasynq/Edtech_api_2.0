@@ -137,6 +137,13 @@ type ProfileRepository interface {
 	GetMutualConnections(ctx context.Context, userID int64) ([]MutualConnection, error)
 	CreateActivityLog(ctx context.Context, log *ActivityLog) error
 	CreateNotification(ctx context.Context, notif *UserNotification) error
+
+	// Study & Dashboard methods
+	GetStudentByUserID(ctx context.Context, userID int64) (*Student, error)
+	GetEnrollmentsByStudentID(ctx context.Context, studentID int64) ([]Enrollment, error)
+	GetCoursesByIDs(ctx context.Context, courseIDs []int64, category string) ([]Course, error)
+	GetClassSchedulesByCourseIDsAndDateRange(ctx context.Context, courseIDs []int64, startDate, endDate time.Time) ([]ClassSchedule, error)
+	GetCompletedClassSchedulesByCourseIDs(ctx context.Context, courseIDs []int64) ([]ClassSchedule, error)
 }
 
 type ProfileUsecase interface {
@@ -144,4 +151,6 @@ type ProfileUsecase interface {
 	UpdateMe(ctx context.Context, userID int64, updates map[string]interface{}) (map[string]interface{}, error)
 	GetMutualConnections(ctx context.Context, userID int64) (map[string]interface{}, error)
 	ToggleFollowUser(ctx context.Context, followerID, followedID int64) (bool, error)
+	GetStudyDashboard(ctx context.Context, userID int64, category string) (map[string]interface{}, error)
+	GetHistory(ctx context.Context, userID int64, category string) (map[string]interface{}, error)
 }

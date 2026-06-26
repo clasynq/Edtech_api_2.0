@@ -21,7 +21,11 @@ func NewTestSeriesUsecase(repo domain.TestSeriesRepository) domain.TestSeriesUse
 }
 
 func (u *testSeriesUsecase) GetTestSeries(ctx context.Context, userID int64, role string, filters map[string]string) ([]domain.TestSeries, error) {
-	return u.repo.GetTestSeries(ctx, filters)
+	list, err := u.repo.GetTestSeries(ctx, filters)
+	if err != nil {
+		return nil, err
+	}
+	return u.populateTestSeriesVirtualFields(ctx, userID, role, list)
 }
 
 func (u *testSeriesUsecase) GetTestSeriesByIDOrSlug(ctx context.Context, userID int64, role string, idOrSlug string) (*domain.TestSeries, bool, error) {
@@ -34,7 +38,55 @@ func (u *testSeriesUsecase) GetTestSeriesByIDOrSlug(ctx context.Context, userID 
 	}
 
 	hasAccess, err := u.HasAccess(ctx, userID, role, ts.ID)
-	return ts, hasAccess, err
+	if err != nil {
+		return nil, false, err
+	}
+
+	wrapped, err := u.populateTestSeriesVirtualFields(ctx, userID, role, []domain.TestSeries{*ts})
+	if err == nil && len(wrapped) > 0 {
+		ts = &wrapped[0]
+	}
+
+	return ts, hasAccess, nil
+}
+
+func (u *testSeriesUsecase) populateTestSeriesVirtualFields(ctx context.Context, userID int64, role string, list []domain.TestSeries) ([]domain.TestSeries, error) {
+	var student *domain.Student
+	var err error
+	if userID > 0 && role == "student" {
+		student, err = u.repo.GetStudentByUserID(ctx, userID)
+		if err != nil {
+			// Log error but proceed without attempts if retrieval fails
+		}
+	}
+
+	for i := range list {
+		for j := range list[i].Tests {
+			test := &list[i].Tests[j]
+			count, err := u.repo.GetQuestionsCountByTestID(ctx, test.ID)
+			if err == nil {
+				test.QuestionsCount = count
+			}
+
+			if student != nil {
+				attempt, err := u.repo.GetStudentAttemptForTest(ctx, student.ID, test.ID)
+				if err == nil && attempt != nil {
+					var score *float64
+					if attempt.Status == "completed" {
+						s := attempt.Score
+						score = &s
+					}
+					test.StudentAttempt = &domain.StudentAttemptResponse{
+						ID:     attempt.ID,
+						Slug:   attempt.Slug,
+						Status: attempt.Status,
+						Score:  score,
+					}
+				}
+			}
+		}
+	}
+	return list, nil
 }
 
 func (u *testSeriesUsecase) CreateTestSeries(ctx context.Context, ts *domain.TestSeries) error {

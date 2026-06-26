@@ -37,7 +37,7 @@ func (User) TableName() string {
 
 type Student struct {
 	ID        int64     `gorm:"primaryKey;column:id" json:"id"`
-	UserID    int64     `gorm:"column:user_id;uniqueIndex;not null" json:"userId"`
+	UserID    int64     `gorm:"column:user_id;unique;not null" json:"userId"`
 	User      User      `gorm:"foreignKey:UserID;constraint:OnDelete:CASCADE" json:"user"`
 	CreatedAt time.Time `gorm:"column:created_at;type:timestamp with time zone;autoCreateTime" json:"createdAt"`
 }

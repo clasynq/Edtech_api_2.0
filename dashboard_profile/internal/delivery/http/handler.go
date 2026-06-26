@@ -42,6 +42,10 @@ func (h *HttpHandler) RegisterRoutes(r *gin.Engine, authMiddleware gin.HandlerFu
 			me.POST("/users/:id/follow/", h.FollowToggle)
 			me.POST("/avatar", h.UploadAvatar)
 			me.POST("/avatar/", h.UploadAvatar)
+			me.GET("/study", h.GetStudyDashboard)
+			me.GET("/study/", h.GetStudyDashboard)
+			me.GET("/history", h.GetHistory)
+			me.GET("/history/", h.GetHistory)
 		}
 	}
 }
@@ -224,4 +228,38 @@ func (h *HttpHandler) UploadAvatar(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"user": res,
 	})
+}
+
+func (h *HttpHandler) GetStudyDashboard(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"detail": "Authentication credentials were not provided."})
+		return
+	}
+	category := c.Query("category")
+
+	res, err := h.usecase.GetStudyDashboard(c.Request.Context(), userID.(int64), category)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "An error occurred.", "detail": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, res)
+}
+
+func (h *HttpHandler) GetHistory(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"detail": "Authentication credentials were not provided."})
+		return
+	}
+	category := c.Query("category")
+
+	res, err := h.usecase.GetHistory(c.Request.Context(), userID.(int64), category)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "An error occurred.", "detail": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, res)
 }

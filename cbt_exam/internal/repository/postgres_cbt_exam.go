@@ -139,6 +139,21 @@ func (r *postgresCbtExamRepository) GetAttemptByIDOrSlug(ctx context.Context, id
 	return &attempt, nil
 }
 
+func (r *postgresCbtExamRepository) GetLastAttemptForStudentAndTest(ctx context.Context, studentID, testID int64) (*domain.StudentTestAttempt, error) {
+	var attempt domain.StudentTestAttempt
+	err := r.db.WithContext(ctx).
+		Where("student_id = ? AND test_id = ?", studentID, testID).
+		Order("started_at DESC").
+		First(&attempt).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &attempt, nil
+}
+
 func (r *postgresCbtExamRepository) CreateAttempt(ctx context.Context, attempt *domain.StudentTestAttempt) error {
 	return r.db.WithContext(ctx).Create(attempt).Error
 }

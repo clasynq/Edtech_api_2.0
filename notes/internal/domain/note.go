@@ -20,7 +20,7 @@ type Note struct {
 	HasSvgs          bool      `gorm:"column:has_svgs;type:boolean;default:false" json:"hasSvgs"`
 	PageCount        int       `gorm:"column:page_count;type:integer;default:0" json:"pageCount"`
 	Category         string    `gorm:"column:category;type:varchar(100);not null" json:"category"`
-	Slug             string    `gorm:"column:slug;type:varchar(100)" json:"slug"`
+	Slug             string    `gorm:"column:slug;type:varchar(100);unique" json:"slug"`
 	RecordedClassURL string    `gorm:"column:recorded_class_url;type:text" json:"recordedClassUrl"`
 	Subject          string    `gorm:"column:subject;type:varchar(255)" json:"subject"`
 	Topic            string    `gorm:"column:topic;type:varchar(255)" json:"topic"`

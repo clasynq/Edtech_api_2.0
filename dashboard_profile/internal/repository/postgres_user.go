@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
 	"clasynq/api/dashboard_profile/internal/domain"
 
@@ -192,4 +193,57 @@ func (r *postgresProfileRepository) CreateActivityLog(ctx context.Context, log *
 
 func (r *postgresProfileRepository) CreateNotification(ctx context.Context, notif *domain.UserNotification) error {
 	return r.db.WithContext(ctx).Create(notif).Error
+}
+
+func (r *postgresProfileRepository) GetStudentByUserID(ctx context.Context, userID int64) (*domain.Student, error) {
+	var student domain.Student
+	if err := r.db.WithContext(ctx).Where("user_id = ?", userID).First(&student).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &student, nil
+}
+
+func (r *postgresProfileRepository) GetEnrollmentsByStudentID(ctx context.Context, studentID int64) ([]domain.Enrollment, error) {
+	var enrollments []domain.Enrollment
+	err := r.db.WithContext(ctx).Where("student_id = ?", studentID).Find(&enrollments).Error
+	return enrollments, err
+}
+
+func (r *postgresProfileRepository) GetCoursesByIDs(ctx context.Context, courseIDs []int64, category string) ([]domain.Course, error) {
+	var courses []domain.Course
+	q := r.db.WithContext(ctx).Preload("Teachers").Preload("Subjects").Where("id IN (?)", courseIDs)
+	if category != "" {
+		q = q.Where("category = ?", category)
+	}
+	err := q.Find(&courses).Error
+	return courses, err
+}
+
+func (r *postgresProfileRepository) GetClassSchedulesByCourseIDsAndDateRange(ctx context.Context, courseIDs []int64, startDate, endDate time.Time) ([]domain.ClassSchedule, error) {
+	var schedules []domain.ClassSchedule
+	err := r.db.WithContext(ctx).
+		Preload("Course").
+		Preload("Course.Subjects").
+		Preload("Teacher").
+		Preload("Subject").
+		Where("course_id IN (?) AND class_date >= ? AND class_date <= ?", courseIDs, startDate.Format("2006-01-02"), endDate.Format("2006-01-02")).
+		Order("class_date ASC, start_time ASC").
+		Find(&schedules).Error
+	return schedules, err
+}
+
+func (r *postgresProfileRepository) GetCompletedClassSchedulesByCourseIDs(ctx context.Context, courseIDs []int64) ([]domain.ClassSchedule, error) {
+	var schedules []domain.ClassSchedule
+	err := r.db.WithContext(ctx).
+		Preload("Course").
+		Preload("Course.Subjects").
+		Preload("Teacher").
+		Preload("Subject").
+		Where("course_id IN (?) AND class_status = 'completed'", courseIDs).
+		Order("class_date DESC, start_time DESC").
+		Find(&schedules).Error
+	return schedules, err
 }

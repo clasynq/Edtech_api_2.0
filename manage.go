@@ -2,9 +2,13 @@ package main
 
 import (
 	"bufio"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math/big"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -14,8 +18,11 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
+	"golang.org/x/crypto/pbkdf2"
+	"golang.org/x/term"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"os/exec"
 )
 
 var validServices = []string{
@@ -61,6 +68,10 @@ func main() {
 		runMakeMigrations(os.Args[2], os.Args[3])
 	case "flushall":
 		runFlushAll(dbURL)
+	case "createadmin":
+		runCreateAdmin(dbURL)
+	case "updatepass":
+		runUpdatePass(dbURL)
 	case "help":
 		printHelp()
 	default:
@@ -79,6 +90,8 @@ func printHelp() {
 	fmt.Println("  migrate                              Apply all pending SQL migrations across all services")
 	fmt.Println("  makemigrations <service> <desc>      Generate a new SQL migration template for a specific service")
 	fmt.Println("  flushall                             Truncate all data tables (clears DB but keeps schemas)")
+	fmt.Println("  createadmin                          Create a new admin query and output insert SQL file")
+	fmt.Println("  updatepass                           Update an admin password and output update SQL file")
 	fmt.Println("  help                                 Show this help screen")
 	fmt.Println("\nValid Services:")
 	for _, s := range validServices {
@@ -99,7 +112,10 @@ func connectDB(dbURL string) *gorm.DB {
 // MIGRATE COMMAND
 // ----------------------------------------------------
 func runMigrate(dbURL string) {
-	fmt.Println("\n[Migrate] Connecting to database...")
+	// 1. Run AutoMigrate for each service using temporary generator files
+	runGormAutoMigrate(dbURL)
+
+	fmt.Println("\n[Migrate] Connecting to database to apply schema updates...")
 	db := connectDB(dbURL)
 
 	// Create global schema_migrations table if not exists
@@ -373,4 +389,528 @@ func findWorkspaceRoot() string {
 	}
 
 	return "." // fallback
+}
+
+// ----------------------------------------------------
+// CREATEADMIN COMMAND
+// ----------------------------------------------------
+func runCreateAdmin(dbURL string) {
+	fmt.Println(strings.Repeat("=", 60))
+	fmt.Println("  ClaSynq Admin SQL Query Generator (Go)")
+	fmt.Println(strings.Repeat("=", 60))
+
+	reader := bufio.NewReader(os.Stdin)
+
+	// Prompt for email
+	fmt.Print("Enter Admin Email: ")
+	emailInput, err := reader.ReadString('\n')
+	if err != nil {
+		fmt.Printf("Error reading email: %v\n", err)
+		os.Exit(1)
+	}
+	email := strings.ToLower(strings.TrimSpace(emailInput))
+	if email == "" {
+		fmt.Println("Error: Email cannot be empty.")
+		os.Exit(1)
+	}
+
+	// Prompt for password
+	password, err := readPassword(reader, "Enter Admin Password: ")
+	if err != nil {
+		fmt.Printf("Error reading password: %v\n", err)
+		os.Exit(1)
+	}
+	if password == "" {
+		fmt.Println("Error: Password cannot be empty.")
+		os.Exit(1)
+	}
+
+	// Confirm password
+	confirmPassword, err := readPassword(reader, "Confirm Admin Password: ")
+	if err != nil {
+		fmt.Printf("Error reading confirmation: %v\n", err)
+		os.Exit(1)
+	}
+	if password != confirmPassword {
+		fmt.Println("Error: Passwords do not match.")
+		os.Exit(1)
+	}
+
+	// Generate Django PBKDF2 hash
+	fmt.Println("\nHashing password...")
+	salt := GenerateSalt(12)
+	hashedPassword := EncodeDjangoPassword(password, salt, 390000)
+
+	// Generate SQL Statement
+	sqlQuery := fmt.Sprintf(`INSERT INTO admin (email, password, created_at)
+VALUES (
+    '%s', 
+    '%s', 
+    NOW()
+);`, email, hashedPassword)
+
+	fmt.Println("\n" + strings.Repeat("=", 60))
+	fmt.Println("  GENERATED SQL QUERY (Copy and run this in your database client)")
+	fmt.Println(strings.Repeat("=", 60))
+	fmt.Println(sqlQuery)
+	fmt.Println(strings.Repeat("=", 60))
+
+	// Write to a file as well for convenience
+	filename := "create_admin.sql"
+	absPath, err := filepath.Abs(filename)
+	if err != nil {
+		absPath = filename
+	}
+
+	err = os.WriteFile(filename, []byte(sqlQuery), 0644)
+	if err != nil {
+		fmt.Printf("\nWarning: Could not save query to file: %v\n", err)
+	} else {
+		fmt.Printf("\nSaved query to file: %s\n", absPath)
+	}
+
+	// Ask if user wants to execute the query immediately on the database
+	fmt.Print("\nDo you want to execute this query on the database immediately? (y/N): ")
+	confirmInput, err := reader.ReadString('\n')
+	if err == nil {
+		confirm := strings.TrimSpace(strings.ToLower(confirmInput))
+		if confirm == "y" || confirm == "yes" {
+			fmt.Println("Connecting to database...")
+			db := connectDB(dbURL)
+			if err := db.Exec(sqlQuery).Error; err != nil {
+				fmt.Printf("Error executing query: %v\n", err)
+			} else {
+				fmt.Println("Success: Query executed and applied to database successfully!")
+			}
+		}
+	}
+}
+
+// ----------------------------------------------------
+// UPDATEPASS COMMAND
+// ----------------------------------------------------
+func runUpdatePass(dbURL string) {
+	fmt.Println(strings.Repeat("=", 60))
+	fmt.Println("  ClaSynq Admin Password Update SQL Generator (Go)")
+	fmt.Println(strings.Repeat("=", 60))
+
+	reader := bufio.NewReader(os.Stdin)
+
+	// Prompt for email
+	fmt.Print("Enter Admin Email to Update: ")
+	emailInput, err := reader.ReadString('\n')
+	if err != nil {
+		fmt.Printf("Error reading email: %v\n", err)
+		os.Exit(1)
+	}
+	email := strings.ToLower(strings.TrimSpace(emailInput))
+	if email == "" {
+		fmt.Println("Error: Email cannot be empty.")
+		os.Exit(1)
+	}
+
+	// Prompt for password
+	password, err := readPassword(reader, "Enter New Admin Password: ")
+	if err != nil {
+		fmt.Printf("Error reading password: %v\n", err)
+		os.Exit(1)
+	}
+	if password == "" {
+		fmt.Println("Error: Password cannot be empty.")
+		os.Exit(1)
+	}
+
+	// Confirm password
+	confirmPassword, err := readPassword(reader, "Confirm New Admin Password: ")
+	if err != nil {
+		fmt.Printf("Error reading confirmation: %v\n", err)
+		os.Exit(1)
+	}
+	if password != confirmPassword {
+		fmt.Println("Error: Passwords do not match.")
+		os.Exit(1)
+	}
+
+	// Generate Django PBKDF2 hash
+	fmt.Println("\nHashing password...")
+	salt := GenerateSalt(12)
+	hashedPassword := EncodeDjangoPassword(password, salt, 390000)
+
+	// Generate SQL Statement
+	sqlQuery := fmt.Sprintf(`UPDATE admin 
+SET password = '%s' 
+WHERE email = '%s';`, hashedPassword, email)
+
+	fmt.Println("\n" + strings.Repeat("=", 60))
+	fmt.Println("  GENERATED SQL QUERY (Copy and run this in your database client)")
+	fmt.Println(strings.Repeat("=", 60))
+	fmt.Println(sqlQuery)
+	fmt.Println(strings.Repeat("=", 60))
+
+	// Write to a file as well for convenience
+	filename := "update_admin.sql"
+	absPath, err := filepath.Abs(filename)
+	if err != nil {
+		absPath = filename
+	}
+
+	err = os.WriteFile(filename, []byte(sqlQuery), 0644)
+	if err != nil {
+		fmt.Printf("\nWarning: Could not save query to file: %v\n", err)
+	} else {
+		fmt.Printf("\nSaved query to file: %s\n", absPath)
+	}
+
+	// Ask if user wants to execute the query immediately on the database
+	fmt.Print("\nDo you want to execute this query on the database immediately? (y/N): ")
+	confirmInput, err := reader.ReadString('\n')
+	if err == nil {
+		confirm := strings.TrimSpace(strings.ToLower(confirmInput))
+		if confirm == "y" || confirm == "yes" {
+			fmt.Println("Connecting to database...")
+			db := connectDB(dbURL)
+			if err := db.Exec(sqlQuery).Error; err != nil {
+				fmt.Printf("Error executing query: %v\n", err)
+			} else {
+				fmt.Println("Success: Query executed and applied to database successfully!")
+			}
+		}
+	}
+}
+
+// Helper functions for password generation
+func readPassword(reader *bufio.Reader, prompt string) (string, error) {
+	fmt.Print(prompt)
+	fd := int(os.Stdin.Fd())
+	if term.IsTerminal(fd) {
+		bytePassword, err := term.ReadPassword(fd)
+		fmt.Println() // Print newline after entering password
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(string(bytePassword)), nil
+	}
+	// Fallback to normal scanner
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(line), nil
+}
+
+func GenerateSalt(length int) string {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	result := make([]byte, length)
+	for i := 0; i < length; i++ {
+		num, _ := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
+		result[i] = charset[num.Int64()]
+	}
+	return string(result)
+}
+
+func EncodeDjangoPassword(plainPassword, salt string, iterations int) string {
+	dk := pbkdf2.Key([]byte(plainPassword), []byte(salt), iterations, 32, sha256.New)
+	hashBase64 := base64.StdEncoding.EncodeToString(dk)
+	return fmt.Sprintf("pbkdf2_sha256$%d$%s$%s", iterations, salt, hashBase64)
+}
+
+func runGormAutoMigrate(dbURL string) {
+	fmt.Println("\n[Migrate] Running GORM AutoMigrate for all service models...")
+	rootPath := findWorkspaceRoot()
+	dbURLQuoted := strconv.Quote(dbURL)
+
+	// Clean up conflicting Django-style unique constraints ending in '_key' 
+	// to prevent GORM AutoMigrate from crashing when dropping constraints.
+	db := connectDB(dbURL)
+	dropSQL := `
+		DO $$ 
+		DECLARE 
+			r RECORD;
+		BEGIN
+			FOR r IN (
+				SELECT 
+					table_name, 
+					constraint_name 
+				FROM 
+					information_schema.table_constraints 
+				WHERE 
+					constraint_schema = 'public' 
+					AND constraint_type = 'UNIQUE' 
+					AND constraint_name LIKE '%\_key'
+			) LOOP
+				EXECUTE 'ALTER TABLE ' || quote_ident(r.table_name) || ' DROP CONSTRAINT ' || quote_ident(r.constraint_name) || ';';
+			END LOOP;
+		END $$;
+	`
+	if err := db.Exec(dropSQL).Error; err != nil {
+		log.Printf("[Migrate] Warning: Failed to drop conflicting Django constraints: %v", err)
+	} else {
+		fmt.Println("[Migrate] Successfully cleared conflicting legacy unique constraints.")
+	}
+	if sqlDB, err := db.DB(); err == nil {
+		sqlDB.Close()
+	}
+
+	// 1. auth
+	authMigrateCode := `package main
+
+import (
+	"log"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+	"clasynq/api/auth/internal/domain"
+)
+
+func main() {
+	dbURL := ` + dbURLQuoted + `
+	db, err := gorm.Open(postgres.Open(dbURL), &gorm.Config{})
+	if err != nil {
+		log.Fatalf("db connection failed: %v", err)
+	}
+	err = db.AutoMigrate(
+		&domain.User{},
+		&domain.Student{},
+		&domain.Admin{},
+		&domain.Teacher{},
+		&domain.PendingRegistration{},
+		&domain.PasswordResetOTP{},
+		&domain.Follow{},
+		&domain.UserNotification{},
+	)
+	if err != nil {
+		log.Fatalf("AutoMigrate failed: %v", err)
+	}
+}
+`
+
+	// 2. notes
+	notesMigrateCode := `package main
+
+import (
+	"log"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+	"clasynq/api/notes/internal/domain"
+)
+
+func main() {
+	dbURL := ` + dbURLQuoted + `
+	db, err := gorm.Open(postgres.Open(dbURL), &gorm.Config{})
+	if err != nil {
+		log.Fatalf("db connection failed: %v", err)
+	}
+	err = db.AutoMigrate(
+		&domain.Note{},
+		&domain.NoteAccess{},
+	)
+	if err != nil {
+		log.Fatalf("AutoMigrate failed: %v", err)
+	}
+}
+`
+
+	// 3. courses
+	coursesMigrateCode := `package main
+
+import (
+	"log"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+	"clasynq/api/courses/internal/domain"
+)
+
+func main() {
+	dbURL := ` + dbURLQuoted + `
+	db, err := gorm.Open(postgres.Open(dbURL), &gorm.Config{})
+	if err != nil {
+		log.Fatalf("db connection failed: %v", err)
+	}
+	err = db.AutoMigrate(
+		&domain.Subject{},
+		&domain.Teacher{},
+		&domain.Course{},
+		&domain.ClassSchedule{},
+	)
+	if err != nil {
+		log.Fatalf("AutoMigrate failed: %v", err)
+	}
+}
+`
+
+	// 4. blog
+	blogMigrateCode := `package main
+
+import (
+	"log"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+	"clasynq/api/blog/internal/domain"
+)
+
+func main() {
+	dbURL := ` + dbURLQuoted + `
+	db, err := gorm.Open(postgres.Open(dbURL), &gorm.Config{})
+	if err != nil {
+		log.Fatalf("db connection failed: %v", err)
+	}
+	err = db.AutoMigrate(
+		&domain.BlogPost{},
+		&domain.BlogLike{},
+		&domain.BlogComment{},
+		&domain.PostView{},
+		&domain.Repost{},
+		&domain.SavedPost{},
+		&domain.ActivityLog{},
+	)
+	if err != nil {
+		log.Fatalf("AutoMigrate failed: %v", err)
+	}
+}
+`
+
+	// 5. enrollments
+	enrollmentsMigrateCode := `package main
+
+import (
+	"log"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+	"clasynq/api/enrollments/internal/domain"
+)
+
+func main() {
+	dbURL := ` + dbURLQuoted + `
+	db, err := gorm.Open(postgres.Open(dbURL), &gorm.Config{})
+	if err != nil {
+		log.Fatalf("db connection failed: %v", err)
+	}
+	err = db.AutoMigrate(
+		&domain.PaymentOrder{},
+		&domain.ReferralTransaction{},
+		&domain.WebhookEvent{},
+		&domain.PaymentAuditLog{},
+		&domain.Enrollment{},
+	)
+	if err != nil {
+		log.Fatalf("AutoMigrate failed: %v", err)
+	}
+}
+`
+
+	// 6. cbt_exam
+	cbtMigrateCode := `package main
+
+import (
+	"log"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+	"clasynq/api/cbt_exam/internal/domain"
+)
+
+func main() {
+	dbURL := ` + dbURLQuoted + `
+	db, err := gorm.Open(postgres.Open(dbURL), &gorm.Config{})
+	if err != nil {
+		log.Fatalf("db connection failed: %v", err)
+	}
+	err = db.AutoMigrate(
+		&domain.TestSeries{},
+		&domain.Test{},
+		&domain.QuestionOption{},
+		&domain.Question{},
+		&domain.StudentTestAttempt{},
+		&domain.StudentAnswer{},
+		&domain.TestResult{},
+		&domain.TestSeriesAccess{},
+	)
+	if err != nil {
+		log.Fatalf("AutoMigrate failed: %v", err)
+	}
+}
+`
+
+	// 7. admin
+	adminMigrateCode := `package main
+
+import (
+	"log"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+	"clasynq/api/admin/internal/domain"
+)
+
+func main() {
+	dbURL := ` + dbURLQuoted + `
+	db, err := gorm.Open(postgres.Open(dbURL), &gorm.Config{})
+	if err != nil {
+		log.Fatalf("db connection failed: %v", err)
+	}
+	err = db.AutoMigrate(
+		&domain.AdminActivity{},
+		&domain.AdminDashboard{},
+	)
+	if err != nil {
+		log.Fatalf("AutoMigrate failed: %v", err)
+	}
+}
+`
+
+	// 8. teacher
+	teacherMigrateCode := `package main
+
+import (
+	"log"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+	"clasynq/api/teacher/internal/domain"
+)
+
+func main() {
+	dbURL := ` + dbURLQuoted + `
+	db, err := gorm.Open(postgres.Open(dbURL), &gorm.Config{})
+	if err != nil {
+		log.Fatalf("db connection failed: %v", err)
+	}
+	err = db.AutoMigrate(
+		&domain.TeacherActivity{},
+	)
+	if err != nil {
+		log.Fatalf("AutoMigrate failed: %v", err)
+	}
+}
+`
+
+	servicesToMigrate := []struct {
+		name string
+		code string
+	}{
+		{"auth", authMigrateCode},
+		{"notes", notesMigrateCode},
+		{"courses", coursesMigrateCode},
+		{"blog", blogMigrateCode},
+		{"enrollments", enrollmentsMigrateCode},
+		{"cbt_exam", cbtMigrateCode},
+		{"admin", adminMigrateCode},
+		{"teacher", teacherMigrateCode},
+	}
+
+	for _, s := range servicesToMigrate {
+		fmt.Printf("[%s] Recreating tables via GORM AutoMigrate...\n", s.name)
+		tmpFile := filepath.Join(rootPath, s.name, "tmp_migrate.go")
+		err := ioutil.WriteFile(tmpFile, []byte(s.code), 0644)
+		if err != nil {
+			log.Fatalf("[%s] Failed to write temporary migrate file: %v", s.name, err)
+		}
+		// Defer deletion so it always cleans up
+		defer os.Remove(tmpFile)
+
+		cmd := exec.Command("go", "run", "tmp_migrate.go")
+		cmd.Dir = filepath.Join(rootPath, s.name)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			log.Fatalf("[%s] GORM AutoMigrate execution failed: %v", s.name, err)
+		}
+	}
+	fmt.Println("[Migrate] GORM AutoMigrate completed successfully for all services.")
 }

@@ -48,14 +48,30 @@ func (u *cbtExamUsecase) StartAttempt(ctx context.Context, userID int64, testIDO
 		return nil, nil, errors.New("you do not have access to this test series")
 	}
 
-	// 2. Check for existing active attempt
-	attempt, err := u.repo.GetOngoingAttempt(ctx, student.ID, test.ID)
+	// 2. Check for existing attempt
+	attempt, err := u.repo.GetLastAttemptForStudentAndTest(ctx, student.ID, test.ID)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	// 3. Create new attempt if not found
-	if attempt == nil {
+	if attempt != nil {
+		if attempt.Status == "submitted" {
+			return nil, nil, errors.New("You have already completed this test.")
+		}
+
+		if attempt.Status == "ongoing" {
+			// Check if time has expired
+			elapsedSeconds := time.Since(attempt.StartedAt).Seconds()
+			durationSeconds := float64(test.DurationMinutes * 60)
+			if elapsedSeconds >= durationSeconds {
+				// Auto-submit the attempt
+				_, _ = u.SubmitTest(ctx, userID, attempt.Slug)
+				return nil, nil, errors.New("Time limit expired. Test submitted automatically.")
+			}
+			// Otherwise allow resume/entry (within remaining seconds)
+		}
+	} else {
+		// 3. Create new attempt if not found
 		slug, err := u.generateUniqueSlug(ctx, "attempt")
 		if err != nil {
 			return nil, nil, err
@@ -333,6 +349,11 @@ func (u *cbtExamUsecase) GetAttemptResult(ctx context.Context, userID int64, att
 		return nil, err
 	}
 
+	test, err := u.repo.GetTestByIDOrSlug(ctx, strconv.FormatInt(attempt.TestID, 10))
+	if err != nil {
+		return nil, err
+	}
+
 	questions, err := u.repo.GetQuestionsByTestID(ctx, attempt.TestID)
 	if err != nil {
 		return nil, err
@@ -343,11 +364,114 @@ func (u *cbtExamUsecase) GetAttemptResult(ctx context.Context, userID int64, att
 		return nil, err
 	}
 
+	// Calculate total participants and rank
+	allResults, err := u.repo.GetResultsForTest(ctx, attempt.TestID)
+	totalParticipants := len(allResults)
+	rank := 1
+	if result != nil {
+		if result.Rank != nil && *result.Rank > 0 {
+			rank = *result.Rank
+		} else {
+			// fallback calculate rank dynamically
+			for _, r := range allResults {
+				if r.Score > result.Score {
+					rank++
+				} else if r.Score == result.Score && r.TimeTakenSeconds < result.TimeTakenSeconds {
+					rank++
+				}
+			}
+		}
+	}
+
+	// Map answers by question ID
+	answersMap := make(map[int64]domain.StudentAnswer)
+	for _, ans := range answers {
+		answersMap[ans.QuestionID] = ans
+	}
+
+	reviews := make([]map[string]interface{}, 0, len(questions))
+	for _, q := range questions {
+		ans, hasAnswer := answersMap[q.ID]
+		selectedAnswer := ""
+		if hasAnswer && ans.SelectedAnswer != nil {
+			selectedAnswer = *ans.SelectedAnswer
+		}
+		isCorrect := false
+		if hasAnswer {
+			isCorrect = ans.IsCorrect
+		}
+		marksObtained := 0.0
+		if hasAnswer {
+			marksObtained = ans.MarksObtained
+		}
+
+		optionsList := make([]map[string]interface{}, 0, len(q.Options))
+		for _, opt := range q.Options {
+			optionsList = append(optionsList, map[string]interface{}{
+				"id":               opt.ID,
+				"optionText":       opt.OptionText,
+				"option_text":      opt.OptionText,
+				"optionImageUrl":   opt.OptionImageURL,
+				"option_image_url": opt.OptionImageURL,
+				"isCorrect":        opt.IsCorrect,
+				"is_correct":       opt.IsCorrect,
+				"questionId":       opt.QuestionID,
+				"question_id":      opt.QuestionID,
+			})
+		}
+
+		reviews = append(reviews, map[string]interface{}{
+			"id":                  q.ID,
+			"questionType":        q.QuestionType,
+			"questionText":        q.QuestionText,
+			"questionImageUrl":    q.QuestionImageURL,
+			"correctAnswer":       q.CorrectAnswer,
+			"marks":               q.Marks,
+			"negativeMarks":       q.NegativeMarks,
+			"explanationText":     q.ExplanationText,
+			"explanationImageUrl": q.ExplanationImageURL,
+			"options":             optionsList,
+			"selectedAnswer":      selectedAnswer,
+			"isCorrect":           isCorrect,
+			"marksObtained":       marksObtained,
+		})
+	}
+
+	var resultMap map[string]interface{}
+	if result != nil {
+		resultMap = map[string]interface{}{
+			"id":                    result.ID,
+			"attempt":               result.AttemptID,
+			"attemptId":             result.AttemptID,
+			"score":                 result.Score,
+			"correctAnswersCount":   result.CorrectAnswersCount,
+			"correct_answers_count": result.CorrectAnswersCount,
+			"wrongAnswersCount":     result.WrongAnswersCount,
+			"wrong_answers_count":   result.WrongAnswersCount,
+			"unattemptedCount":      result.UnattemptedCount,
+			"unattempted_count":     result.UnattemptedCount,
+			"accuracy":              result.Accuracy,
+			"timeTakenSeconds":      result.TimeTakenSeconds,
+			"time_taken_seconds":    result.TimeTakenSeconds,
+			"rank":                  rank,
+			"created_at":            result.CreatedAt,
+			"createdAt":             result.CreatedAt,
+		}
+	}
+
+	testTitle := ""
+	totalMarks := 0
+	if test != nil {
+		testTitle = test.Title
+		totalMarks = test.TotalMarks
+	}
+
 	return map[string]interface{}{
-		"attempt":   attempt,
-		"result":    result,
-		"questions": questions,
-		"answers":   answers,
+		"testTitle":         testTitle,
+		"totalMarks":        totalMarks,
+		"result":            resultMap,
+		"reviews":           reviews,
+		"totalParticipants": totalParticipants,
 	}, nil
 }
 

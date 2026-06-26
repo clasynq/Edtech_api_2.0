@@ -57,7 +57,7 @@ type TestSeries struct {
 	CourseID    *int64     `gorm:"column:course_id" json:"courseId"`
 	IsFree      bool       `gorm:"column:is_free;type:boolean;not null;default:false" json:"isFree"`
 	Price       float64    `gorm:"column:price;type:numeric(10,2);not null" json:"price"`
-	Slug        string     `gorm:"column:slug;type:varchar(100);uniqueIndex" json:"slug"`
+	Slug        string     `gorm:"column:slug;type:varchar(100);unique" json:"slug"`
 }
 
 func (TestSeries) TableName() string {
@@ -76,7 +76,7 @@ type Test struct {
 	IsPublished     bool      `gorm:"column:is_published;type:boolean;not null;default:false" json:"isPublished"`
 	CreatedAt       time.Time `gorm:"column:created_at;type:timestamp with time zone;autoCreateTime" json:"createdAt"`
 	TestSeriesID    int64     `gorm:"column:test_series_id;not null" json:"testSeriesId"`
-	Slug            string    `gorm:"column:slug;type:varchar(100);uniqueIndex" json:"slug"`
+	Slug            string    `gorm:"column:slug;type:varchar(100);unique" json:"slug"`
 }
 
 func (Test) TableName() string {
@@ -126,7 +126,7 @@ type StudentTestAttempt struct {
 	Status       string     `gorm:"column:status;type:varchar(50);not null" json:"status"` // ongoing, submitted
 	StudentID    int64      `gorm:"column:student_id;not null" json:"studentId"`
 	TestID       int64      `gorm:"column:test_id;not null" json:"testId"`
-	Slug         string     `gorm:"column:slug;type:varchar(100);uniqueIndex" json:"slug"`
+	Slug         string     `gorm:"column:slug;type:varchar(100);unique" json:"slug"`
 }
 
 func (StudentTestAttempt) TableName() string {
@@ -201,6 +201,7 @@ type CbtExamRepository interface {
 
 	GetOngoingAttempt(ctx context.Context, studentID, testID int64) (*StudentTestAttempt, error)
 	GetAttemptByIDOrSlug(ctx context.Context, idOrSlug string) (*StudentTestAttempt, error)
+	GetLastAttemptForStudentAndTest(ctx context.Context, studentID, testID int64) (*StudentTestAttempt, error)
 	CreateAttempt(ctx context.Context, attempt *StudentTestAttempt) error
 	UpdateAttempt(ctx context.Context, attempt *StudentTestAttempt) error
 

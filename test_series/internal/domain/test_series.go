@@ -68,19 +68,43 @@ func (TestSeries) TableName() string {
 	return "test_series"
 }
 
+type StudentAttemptResponse struct {
+	ID     int64    `json:"id"`
+	Slug   string   `json:"slug"`
+	Status string   `json:"status"`
+	Score  *float64 `json:"score"`
+}
+
+type StudentTestAttempt struct {
+	ID          int64      `gorm:"primaryKey;column:id" json:"id"`
+	StartedAt   time.Time  `gorm:"column:started_at;type:timestamp with time zone" json:"startedAt"`
+	SubmittedAt *time.Time `gorm:"column:submitted_at;type:timestamp with time zone" json:"submittedAt"`
+	Score       float64    `gorm:"column:score;type:numeric(6,2);not null" json:"score"`
+	Status      string     `gorm:"column:status;type:varchar(50);not null" json:"status"` // started, completed
+	StudentID   int64      `gorm:"column:student_id;not null" json:"studentId"`
+	TestID      int64      `gorm:"column:test_id;not null" json:"testId"`
+	Slug        string     `gorm:"column:slug;type:varchar(100);uniqueIndex" json:"slug"`
+}
+
+func (StudentTestAttempt) TableName() string {
+	return "student_test_attempts"
+}
+
 // Test represents the tests table
 type Test struct {
-	ID              int64     `gorm:"primaryKey;column:id" json:"id"`
-	Title           string    `gorm:"column:title;type:varchar(255);not null" json:"title"`
-	Description     string    `gorm:"column:description;type:text;not null" json:"description"`
-	DurationMinutes int       `gorm:"column:duration_minutes;type:integer;not null" json:"durationMinutes"`
-	TotalMarks      int       `gorm:"column:total_marks;type:integer;not null" json:"totalMarks"`
-	NegativeMarking bool      `gorm:"column:negative_marking;type:boolean;not null" json:"negativeMarking"`
-	Instructions    *string   `gorm:"column:instructions;type:text" json:"instructions"`
-	IsPublished     bool      `gorm:"column:is_published;type:boolean;not null;default:false" json:"isPublished"`
-	CreatedAt       time.Time `gorm:"column:created_at;type:timestamp with time zone;autoCreateTime" json:"createdAt"`
-	TestSeriesID    int64     `gorm:"column:test_series_id;not null" json:"testSeriesId"`
-	Slug            string    `gorm:"column:slug;type:varchar(100);uniqueIndex" json:"slug"`
+	ID              int64                   `gorm:"primaryKey;column:id" json:"id"`
+	Title           string                  `gorm:"column:title;type:varchar(255);not null" json:"title"`
+	Description     string                  `gorm:"column:description;type:text;not null" json:"description"`
+	DurationMinutes int                     `gorm:"column:duration_minutes;type:integer;not null" json:"durationMinutes"`
+	TotalMarks      int                     `gorm:"column:total_marks;type:integer;not null" json:"totalMarks"`
+	NegativeMarking bool                    `gorm:"column:negative_marking;type:boolean;not null" json:"negativeMarking"`
+	Instructions    *string                 `gorm:"column:instructions;type:text" json:"instructions"`
+	IsPublished     bool                    `gorm:"column:is_published;type:boolean;not null;default:false" json:"isPublished"`
+	CreatedAt       time.Time               `gorm:"column:created_at;type:timestamp with time zone;autoCreateTime" json:"createdAt"`
+	TestSeriesID    int64                   `gorm:"column:test_series_id;not null" json:"testSeriesId"`
+	Slug            string                  `gorm:"column:slug;type:varchar(100);uniqueIndex" json:"slug"`
+	QuestionsCount  int                     `json:"questionsCount" gorm:"-"`
+	StudentAttempt  *StudentAttemptResponse `json:"studentAttempt" gorm:"-"`
 }
 
 func (Test) TableName() string {
@@ -155,6 +179,9 @@ type TestSeriesRepository interface {
 	GetStudentByUserID(ctx context.Context, userID int64) (*Student, error)
 	HasTestSeriesAccess(ctx context.Context, studentID, seriesID int64) (bool, error)
 	IsStudentEnrolledInCourse(ctx context.Context, studentID, courseID int64) (bool, error)
+
+	GetQuestionsCountByTestID(ctx context.Context, testID int64) (int, error)
+	GetStudentAttemptForTest(ctx context.Context, studentID, testID int64) (*StudentTestAttempt, error)
 }
 
 type TestSeriesUsecase interface {
