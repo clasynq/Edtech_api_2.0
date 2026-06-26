@@ -126,7 +126,6 @@ func (Follow) TableName() string {
 type UserNotification struct {
 	ID               int64     `gorm:"primaryKey;column:id" json:"id"`
 	RecipientID      int64     `gorm:"column:recipient_id;index;not null" json:"recipientId"`
-	Recipient        User      `gorm:"foreignKey:RecipientID;constraint:OnDelete:CASCADE" json:"-"`
 	RecipientRole    string    `gorm:"column:recipient_role;type:varchar(50);default:'student'" json:"recipientRole"`
 	SenderID         *int64    `gorm:"column:sender_id;index" json:"senderId"`
 	Sender           *User     `gorm:"foreignKey:SenderID;constraint:OnDelete:SET NULL" json:"sender,omitempty"`

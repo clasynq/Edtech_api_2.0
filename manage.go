@@ -623,6 +623,9 @@ func runGormAutoMigrate(dbURL string) {
 	// to prevent GORM AutoMigrate from crashing when dropping constraints.
 	db := connectDB(dbURL)
 	dropSQL := `
+		-- Drop the invalid polymorphic UserNotification foreign key if it exists
+		ALTER TABLE user_notifications DROP CONSTRAINT IF EXISTS fk_user_notifications_recipient;
+
 		DO $$ 
 		DECLARE 
 			r RECORD;
