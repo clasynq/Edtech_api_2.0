@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"math/big"
 	"strconv"
 	"strings"
@@ -61,6 +62,21 @@ func (u *testSeriesUsecase) populateTestSeriesVirtualFields(ctx context.Context,
 	}
 
 	for i := range list {
+		hasAccess := false
+		if role == "admin" || role == "teacher" {
+			hasAccess = true
+		} else if student != nil {
+			acc, err := u.HasAccess(ctx, userID, role, list[i].ID)
+			if err == nil {
+				hasAccess = acc
+			}
+		} else {
+			hasAccess = list[i].IsFree || list[i].Price <= 0
+		}
+		list[i].HasAccess = hasAccess
+		list[i].IsPurchased = hasAccess
+		list[i].IsPurchasedSnake = hasAccess
+
 		for j := range list[i].Tests {
 			test := &list[i].Tests[j]
 			count, err := u.repo.GetQuestionsCountByTestID(ctx, test.ID)
@@ -272,17 +288,23 @@ func (u *testSeriesUsecase) UploadQuestions(ctx context.Context, testID int64, d
 	for _, row := range data {
 		normRow := make(map[string]interface{})
 		for k, v := range row {
-			normRow[strings.ToLower(strings.TrimSpace(k))] = v
+			cleanKey := strings.TrimPrefix(k, "\ufeff")
+			cleanKey = strings.ReplaceAll(cleanKey, "-", "_")
+			cleanKey = strings.ReplaceAll(cleanKey, " ", "_")
+			for strings.Contains(cleanKey, "__") {
+				cleanKey = strings.ReplaceAll(cleanKey, "__", "_")
+			}
+			normRow[strings.ToLower(strings.TrimSpace(cleanKey))] = v
 		}
 
 		questionType := "MCQ"
 		if qtVal, ok := normRow["question_type"]; ok && qtVal != nil {
-			questionType = strings.ToUpper(strings.TrimSpace(qtVal.(string)))
+			questionType = strings.ToUpper(strings.TrimSpace(parseStringVal(qtVal)))
 		}
 
 		var questionText *string
 		if qtTextVal, ok := normRow["question_text"]; ok && qtTextVal != nil {
-			strVal := qtTextVal.(string)
+			strVal := parseStringVal(qtTextVal)
 			questionText = &strVal
 		}
 
@@ -292,7 +314,7 @@ func (u *testSeriesUsecase) UploadQuestions(ctx context.Context, testID int64, d
 
 		var correctAnswer *string
 		if caVal, ok := normRow["correct_answer"]; ok && caVal != nil {
-			strVal := strings.TrimSpace(caVal.(string))
+			strVal := strings.TrimSpace(parseStringVal(caVal))
 			correctAnswer = &strVal
 		}
 
@@ -335,7 +357,7 @@ func (u *testSeriesUsecase) UploadQuestions(ctx context.Context, testID int64, d
 
 		var expText *string
 		if etVal, ok := normRow["explanation_text"]; ok && etVal != nil {
-			strVal := etVal.(string)
+			strVal := parseStringVal(etVal)
 			expText = &strVal
 		}
 
@@ -386,7 +408,7 @@ func (u *testSeriesUsecase) UploadQuestions(ctx context.Context, testID int64, d
 					letter := strings.ToUpper(strings.Split(key, "_")[1])
 					optTextVal := ""
 					if val, ok := normRow[key]; ok && val != nil {
-						optTextVal = strings.TrimSpace(val.(string))
+						optTextVal = strings.TrimSpace(parseStringVal(val))
 					}
 					if optTextVal != "" {
 						isCorrect := false
@@ -413,6 +435,23 @@ func (u *testSeriesUsecase) UploadQuestions(ctx context.Context, testID int64, d
 	}
 
 	return createdCount, nil
+}
+
+func parseStringVal(val interface{}) string {
+	if val == nil {
+		return ""
+	}
+	switch v := val.(type) {
+	case string:
+		return v
+	case float64:
+		if v == float64(int64(v)) {
+			return strconv.FormatInt(int64(v), 10)
+		}
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	default:
+		return fmt.Sprintf("%v", v)
+	}
 }
 
 func (u *testSeriesUsecase) GetQuestionsByTestID(ctx context.Context, testID int64) ([]domain.Question, error) {

@@ -58,7 +58,7 @@ func main() {
 
 	// 4. Initialize Layers
 	repo := repository.NewPostgresAdminRepository(db)
-	uc := usecase.NewAdminUsecase(repo, rdb)
+	uc := usecase.NewAdminUsecase(repo, rdb, cfg.SmtpHost, cfg.SmtpPort, cfg.SmtpUser, cfg.SmtpPass, cfg.DefaultFromEmail)
 	handler := delivery.NewHttpHandler(uc, cfg.SecretKey, cfg.MediaRoot, cfg.BaseURL)
 	authMiddleware := delivery.AuthMiddleware(cfg.SecretKey)
 

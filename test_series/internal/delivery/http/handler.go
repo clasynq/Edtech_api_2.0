@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -769,7 +770,32 @@ func (h *httpHandler) UploadQuestions(c *gin.Context) {
 		}
 		dataList = list
 	} else if strings.HasSuffix(filename, ".csv") {
+		// Auto-detect delimiter
+		commaCount := 0
+		semicolonCount := 0
+		tabCount := 0
+
+		buf := make([]byte, 2048)
+		n, _ := fileReader.Read(buf)
+		for i := 0; i < n; i++ {
+			if buf[i] == ',' {
+				commaCount++
+			} else if buf[i] == ';' {
+				semicolonCount++
+			} else if buf[i] == '\t' {
+				tabCount++
+			}
+		}
+		// Seek back to start
+		_, _ = fileReader.Seek(0, io.SeekStart)
+
 		reader := csv.NewReader(fileReader)
+		if semicolonCount > commaCount && semicolonCount > tabCount {
+			reader.Comma = ';'
+		} else if tabCount > commaCount && tabCount > semicolonCount {
+			reader.Comma = '\t'
+		}
+
 		records, err := reader.ReadAll()
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("invalid csv file: %v", err)})

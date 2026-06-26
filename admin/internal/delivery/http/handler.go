@@ -42,6 +42,25 @@ func (h *HttpHandler) RegisterRoutes(r *gin.Engine, authMiddleware gin.HandlerFu
 			platform.GET("/categories", h.GetPlatformCategories)
 		}
 
+		// Careers Public (General/Public)
+		careersPublic := api.Group("/careers")
+		{
+			careersPublic.GET("/positions", h.GetCareersPositions)
+			careersPublic.POST("/apply", h.SubmitJobApplication)
+		}
+
+		// Careers Admin (Authenticated + Admin required)
+		careersAdmin := api.Group("/careers/admin")
+		careersAdmin.Use(authMiddleware, RequireAdmin())
+		{
+			careersAdmin.GET("/applications", h.GetAdminApplications)
+			careersAdmin.POST("/applications/:id/notify", h.SendCandidateNotification)
+			careersAdmin.GET("/positions", h.GetAdminPositions)
+			careersAdmin.POST("/positions", h.CreateJobPosition)
+			careersAdmin.PATCH("/positions/:id", h.UpdateJobPosition)
+			careersAdmin.DELETE("/positions/:id", h.DeleteJobPosition)
+		}
+
 		// Admin Specific (Requires Admin JWT role)
 		admin := api.Group("/admin")
 		admin.Use(authMiddleware, RequireAdmin())
@@ -403,3 +422,265 @@ func (h *HttpHandler) saveFileLocally(c *gin.Context, formFieldName, folder stri
 	baseMediaURL := strings.TrimSuffix(h.baseURL, "/")
 	return fmt.Sprintf("%s/media/%s", baseMediaURL, relPath), nil
 }
+
+func (h *HttpHandler) GetCareersPositions(c *gin.Context) {
+	list, err := h.usecase.ListActiveJobPositions(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, list)
+}
+
+func (h *HttpHandler) SubmitJobApplication(c *gin.Context) {
+	// Check resume_file size & type
+	resumeHeader, err := c.FormFile("resume_file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "resume_file is required"})
+		return
+	}
+	if resumeHeader.Size > 200*1024 {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "resume file must be less than or equal to 200KB"})
+		return
+	}
+	if strings.ToLower(filepath.Ext(resumeHeader.Filename)) != ".pdf" {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "resume must be a PDF file"})
+		return
+	}
+
+	// Check photo_file size & type
+	photoHeader, err := c.FormFile("photo_file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "photo_file is required"})
+		return
+	}
+	if photoHeader.Size > 100*1024 {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "photo file must be less than or equal to 100KB"})
+		return
+	}
+	photoExt := strings.ToLower(filepath.Ext(photoHeader.Filename))
+	if photoExt != ".jpg" && photoExt != ".jpeg" && photoExt != ".png" {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "photo must be a JPG, JPEG, or PNG file"})
+		return
+	}
+
+	// Save files
+	resumeURL, err := h.saveFileLocally(c, "resume_file", "careers/resumes")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to save resume: " + err.Error()})
+		return
+	}
+
+	photoURL, err := h.saveFileLocally(c, "photo_file", "careers/photos")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to save photo: " + err.Error()})
+		return
+	}
+
+	// Parse fields
+	var positionID *int64
+	posStr := c.PostForm("position")
+	if posStr != "" {
+		if pID, err := strconv.ParseInt(posStr, 10, 64); err == nil {
+			positionID = &pID
+		}
+	}
+
+	passingYear, _ := strconv.Atoi(c.PostForm("passing_year"))
+	cgpa, _ := strconv.ParseFloat(c.PostForm("cgpa"), 64)
+	expYears, _ := strconv.ParseFloat(c.PostForm("experience_years"), 64)
+
+	app := domain.JobApplication{
+		PositionID:      positionID,
+		FullName:        c.PostForm("full_name"),
+		Email:           c.PostForm("email"),
+		Phone:           c.PostForm("phone"),
+		Qualification:   c.PostForm("qualification"),
+		Branch:          c.PostForm("branch"),
+		PursuitStatus:   c.PostForm("pursuit_status"),
+		PassingYear:     passingYear,
+		CGPA:            cgpa,
+		ApplyForRole:    c.PostForm("apply_for_role"),
+		Specialization:  c.PostForm("specialization"),
+		ExperienceYears: expYears,
+		ResumeURL:       resumeURL,
+		PhotoURL:        photoURL,
+	}
+
+	if err := h.usecase.CreateJobApplication(c.Request.Context(), &app); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{"message": "Application submitted successfully", "application": app})
+}
+
+func (h *HttpHandler) GetAdminPositions(c *gin.Context) {
+	list, err := h.usecase.GetAdminPositions(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, list)
+}
+
+func (h *HttpHandler) CreateJobPosition(c *gin.Context) {
+	var payload struct {
+		Title          string `json:"title" binding:"required"`
+		Department     string `json:"department" binding:"required"`
+		Location       string `json:"location" binding:"required"`
+		EmploymentType string `json:"employment_type" binding:"required"`
+		Description    string `json:"description" binding:"required"`
+		Requirements   string `json:"requirements" binding:"required"`
+		IsActive       *bool  `json:"is_active" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+		return
+	}
+
+	jp := domain.JobPosition{
+		Title:          payload.Title,
+		Department:     payload.Department,
+		Location:       payload.Location,
+		EmploymentType: payload.EmploymentType,
+		Description:    payload.Description,
+		Requirements:   payload.Requirements,
+		IsActive:       *payload.IsActive,
+	}
+
+	if err := h.usecase.CreateJobPosition(c.Request.Context(), &jp); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, jp)
+}
+
+func (h *HttpHandler) UpdateJobPosition(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid position ID"})
+		return
+	}
+
+	var body map[string]interface{}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+		return
+	}
+
+	updates := make(map[string]interface{})
+	if val, ok := body["title"]; ok {
+		updates["title"] = val
+	}
+	if val, ok := body["department"]; ok {
+		updates["department"] = val
+	}
+	if val, ok := body["location"]; ok {
+		updates["location"] = val
+	}
+	if val, ok := body["employment_type"]; ok {
+		updates["employment_type"] = val
+	}
+	if val, ok := body["description"]; ok {
+		updates["description"] = val
+	}
+	if val, ok := body["requirements"]; ok {
+		updates["requirements"] = val
+	}
+	if val, ok := body["is_active"]; ok {
+		updates["is_active"] = val
+	}
+
+	jp, err := h.usecase.UpdateJobPosition(c.Request.Context(), id, updates)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, jp)
+}
+
+func (h *HttpHandler) DeleteJobPosition(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid position ID"})
+		return
+	}
+
+	if err := h.usecase.DeleteJobPosition(c.Request.Context(), id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusNoContent, nil)
+}
+
+func (h *HttpHandler) GetAdminApplications(c *gin.Context) {
+	list, err := h.usecase.ListJobApplications(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, list)
+}
+
+func (h *HttpHandler) SendCandidateNotification(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid application ID"})
+		return
+	}
+
+	emailType := c.PostForm("email_type")
+	if emailType == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "email_type is required"})
+		return
+	}
+
+	meetingLink := c.PostForm("meeting_link")
+	interviewDatetime := c.PostForm("interview_datetime")
+
+	var joiningLetterName string
+	var joiningLetterData []byte
+
+	if strings.ToLower(emailType) == "selection" {
+		file, header, err := c.Request.FormFile("joining_letter")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "joining_letter file is required for selection notification"})
+			return
+		}
+		defer file.Close()
+
+		if header.Size > 100*1024 {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "joining letter PDF must be less than or equal to 100KB"})
+			return
+		}
+
+		if strings.ToLower(filepath.Ext(header.Filename)) != ".pdf" {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "joining letter must be a PDF file"})
+			return
+		}
+
+		joiningLetterName = header.Filename
+		joiningLetterData, err = io.ReadAll(file)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to read joining letter file: " + err.Error()})
+			return
+		}
+	}
+
+	err = h.usecase.SendCandidateNotification(c.Request.Context(), id, emailType, meetingLink, interviewDatetime, joiningLetterName, joiningLetterData)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Email sent successfully!"})
+}
+

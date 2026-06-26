@@ -507,3 +507,66 @@ func (r *postgresAdminRepository) GetRecordingsCount(ctx context.Context) (int64
 		Count(&count).Error
 	return count, err
 }
+
+func (r *postgresAdminRepository) ListActiveJobPositions(ctx context.Context) ([]domain.JobPosition, error) {
+	var list []domain.JobPosition
+	err := r.db.WithContext(ctx).Where("is_active = ?", true).Order("created_at desc").Find(&list).Error
+	return list, err
+}
+
+func (r *postgresAdminRepository) ListJobPositions(ctx context.Context) ([]domain.JobPosition, error) {
+	var list []domain.JobPosition
+	err := r.db.WithContext(ctx).Order("created_at desc").Find(&list).Error
+	return list, err
+}
+
+func (r *postgresAdminRepository) GetJobPositionByID(ctx context.Context, id int64) (*domain.JobPosition, error) {
+	var jp domain.JobPosition
+	err := r.db.WithContext(ctx).First(&jp, id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &jp, nil
+}
+
+func (r *postgresAdminRepository) CreateJobPosition(ctx context.Context, jp *domain.JobPosition) error {
+	return r.db.WithContext(ctx).Create(jp).Error
+}
+
+func (r *postgresAdminRepository) UpdateJobPosition(ctx context.Context, id int64, updates map[string]interface{}) (*domain.JobPosition, error) {
+	var jp domain.JobPosition
+	if err := r.db.WithContext(ctx).First(&jp, id).Error; err != nil {
+		return nil, err
+	}
+	if err := r.db.WithContext(ctx).Model(&jp).Updates(updates).Error; err != nil {
+		return nil, err
+	}
+	return &jp, nil
+}
+
+func (r *postgresAdminRepository) DeleteJobPosition(ctx context.Context, id int64) error {
+	return r.db.WithContext(ctx).Delete(&domain.JobPosition{}, id).Error
+}
+
+func (r *postgresAdminRepository) ListJobApplications(ctx context.Context) ([]domain.JobApplication, error) {
+	var list []domain.JobApplication
+	err := r.db.WithContext(ctx).Order("created_at desc").Find(&list).Error
+	return list, err
+}
+
+func (r *postgresAdminRepository) GetJobApplicationByID(ctx context.Context, id int64) (*domain.JobApplication, error) {
+	var app domain.JobApplication
+	err := r.db.WithContext(ctx).First(&app, id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &app, nil
+}
+
+func (r *postgresAdminRepository) CreateJobApplication(ctx context.Context, app *domain.JobApplication) error {
+	return r.db.WithContext(ctx).Create(app).Error
+}
+
+func (r *postgresAdminRepository) UpdateJobApplication(ctx context.Context, app *domain.JobApplication) error {
+	return r.db.WithContext(ctx).Save(app).Error
+}

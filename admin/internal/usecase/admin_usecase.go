@@ -16,12 +16,25 @@ import (
 )
 
 type adminUsecase struct {
-	repo domain.AdminRepository
-	rdb  *redis.Client
+	repo             domain.AdminRepository
+	rdb              *redis.Client
+	smtpHost         string
+	smtpPort         string
+	smtpUser         string
+	smtpPass         string
+	defaultFromEmail string
 }
 
-func NewAdminUsecase(repo domain.AdminRepository, rdb *redis.Client) domain.AdminUsecase {
-	return &adminUsecase{repo: repo, rdb: rdb}
+func NewAdminUsecase(repo domain.AdminRepository, rdb *redis.Client, smtpHost, smtpPort, smtpUser, smtpPass, defaultFromEmail string) domain.AdminUsecase {
+	return &adminUsecase{
+		repo:             repo,
+		rdb:              rdb,
+		smtpHost:         smtpHost,
+		smtpPort:         smtpPort,
+		smtpUser:         smtpUser,
+		smtpPass:         smtpPass,
+		defaultFromEmail: defaultFromEmail,
+	}
 }
 
 func (u *adminUsecase) GetOverview(ctx context.Context) (map[string]interface{}, error) {
@@ -871,5 +884,171 @@ func (u *adminUsecase) invalidateTeacherCache(ctx context.Context, teacherID int
 				break
 			}
 		}
+	}
+}
+
+func (u *adminUsecase) ListActiveJobPositions(ctx context.Context) ([]domain.JobPosition, error) {
+	return u.repo.ListActiveJobPositions(ctx)
+}
+
+func (u *adminUsecase) CreateJobApplication(ctx context.Context, app *domain.JobApplication) error {
+	app.Status = "applied"
+	if err := u.repo.CreateJobApplication(ctx, app); err != nil {
+		return err
+	}
+
+	// Trigger async confirmation email
+	go func(email, name, role string) {
+		subject := "Application Received - ClaSynq"
+		body := fmt.Sprintf(
+			"Hi %s,\n\n"+
+				"Thank you for applying for the %s position at ClaSynq!\n\n"+
+				"We have successfully received your application. Our recruitment team is currently reviewing "+
+				"your profile and qualifications. If your experience aligns with our needs, we will reach out "+
+				"to you for the next steps in the interview process.\n\n"+
+				"Thank you again for your interest in ClaSynq and for taking the time to apply.\n\n"+
+				"Best regards,\n"+
+				"The ClaSynq Team\n"+
+				"https://clasynq.in",
+			name, role,
+		)
+		_ = utils.SendEmail(email, subject, body, u.defaultFromEmail, u.smtpHost, u.smtpPort, u.smtpUser, u.smtpPass)
+	}(app.Email, app.FullName, app.ApplyForRole)
+
+	return nil
+}
+
+func (u *adminUsecase) ListJobApplications(ctx context.Context) ([]domain.JobApplication, error) {
+	return u.repo.ListJobApplications(ctx)
+}
+
+func (u *adminUsecase) GetAdminPositions(ctx context.Context) ([]domain.JobPosition, error) {
+	return u.repo.ListJobPositions(ctx)
+}
+
+func (u *adminUsecase) CreateJobPosition(ctx context.Context, jp *domain.JobPosition) error {
+	return u.repo.CreateJobPosition(ctx, jp)
+}
+
+func (u *adminUsecase) UpdateJobPosition(ctx context.Context, id int64, updates map[string]interface{}) (*domain.JobPosition, error) {
+	return u.repo.UpdateJobPosition(ctx, id, updates)
+}
+
+func (u *adminUsecase) DeleteJobPosition(ctx context.Context, id int64) error {
+	return u.repo.DeleteJobPosition(ctx, id)
+}
+
+func (u *adminUsecase) SendCandidateNotification(ctx context.Context, id int64, emailType, meetingLink, interviewDatetime string, joiningLetterName string, joiningLetterData []byte) error {
+	app, err := u.repo.GetJobApplicationByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if app == nil {
+		return errors.New("candidate application not found")
+	}
+
+	emailType = strings.ToLower(emailType)
+	switch emailType {
+	case "selection":
+		if len(joiningLetterData) == 0 {
+			return errors.New("joining letter PDF is required")
+		}
+
+		subject := "Congratulations! Welcome to the ClaSynq family"
+		body := fmt.Sprintf(
+			"Hi %s,\n\n"+
+				"Congratulations! You are selected for the %s position. Welcome to the ClaSynq family!\n\n"+
+				"We are thrilled to have you join our team. Please find attached your official Joining Letter.\n\n"+
+				"Best regards,\n"+
+				"The ClaSynq Team\n"+
+				"https://clasynq.in",
+			app.FullName, app.ApplyForRole,
+		)
+
+		err = utils.SendEmailWithAttachment(
+			app.Email, subject, body, u.defaultFromEmail, u.smtpHost, u.smtpPort, u.smtpUser, u.smtpPass,
+			joiningLetterName, joiningLetterData,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to send selection email: %w", err)
+		}
+
+		app.Status = "hired"
+		return u.repo.UpdateJobApplication(ctx, app)
+
+	case "rejection":
+		subject := "Update on your job application - ClaSynq"
+		body := fmt.Sprintf(
+			"Hi %s,\n\n"+
+				"Thank you for your interest in joining ClaSynq and applying for the %s position.\n\n"+
+				"We appreciate you taking the time to apply and speak with us. "+
+				"Unfortunately, we are not moving forward with your application at this time. "+
+				"We will keep your details on file and reach out if a matching opportunity opens in the future.\n\n"+
+				"We wish you all the best in your job search and future career endeavors.\n\n"+
+				"Best regards,\n"+
+				"The ClaSynq Team\n"+
+				"https://clasynq.in",
+			app.FullName, app.ApplyForRole,
+		)
+
+		err = utils.SendEmail(
+			app.Email, subject, body, u.defaultFromEmail, u.smtpHost, u.smtpPort, u.smtpUser, u.smtpPass,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to send rejection email: %w", err)
+		}
+
+		app.Status = "rejected"
+		return u.repo.UpdateJobApplication(ctx, app)
+
+	case "interview":
+		if meetingLink == "" || interviewDatetime == "" {
+			return errors.New("both meeting_link and interview_datetime are required")
+		}
+
+		subject := "Invitation to Interview - ClaSynq"
+		body := fmt.Sprintf(
+			"Hi %s,\n\n"+
+				"Congratulations! You have been selected for the interview round for the %s position at ClaSynq.\n\n"+
+				"Here are the details for your scheduled interview:\n"+
+				"Date & Time: %s\n"+
+				"Meeting Link: %s\n\n"+
+				"Please join using the link above at the scheduled time. If you have any questions or need to reschedule, please reply to this email.\n\n"+
+				"Best regards,\n"+
+				"The ClaSynq Team\n"+
+				"https://clasynq.in",
+			app.FullName, app.ApplyForRole, interviewDatetime, meetingLink,
+		)
+
+		err = utils.SendEmail(
+			app.Email, subject, body, u.defaultFromEmail, u.smtpHost, u.smtpPort, u.smtpUser, u.smtpPass,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to send interview invite email: %w", err)
+		}
+
+		app.Status = "shortlisted"
+		app.MeetingLink = meetingLink
+		
+		t, parseErr := time.Parse(time.RFC3339, interviewDatetime)
+		if parseErr == nil {
+			app.InterviewDateTime = &t
+		} else {
+			// Fallback: parse simple datetime string "YYYY-MM-DD HH:MM"
+			t2, parseErr2 := time.Parse("2006-01-02 15:04", interviewDatetime)
+			if parseErr2 == nil {
+				app.InterviewDateTime = &t2
+			} else {
+				t3, parseErr3 := time.Parse("2006-01-02T15:04", interviewDatetime)
+				if parseErr3 == nil {
+					app.InterviewDateTime = &t3
+				}
+			}
+		}
+
+		return u.repo.UpdateJobApplication(ctx, app)
+
+	default:
+		return errors.New("invalid email_type")
 	}
 }

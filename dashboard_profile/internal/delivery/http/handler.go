@@ -68,6 +68,11 @@ func (h *HttpHandler) GetMe(c *gin.Context) {
 		return
 	}
 
+	// Disable caching
+	c.Header("Cache-Control", "no-store, no-cache, must-revalidate, post-check=0, pre-check=0")
+	c.Header("Pragma", "no-cache")
+	c.Header("Expires", "0")
+
 	c.JSON(http.StatusOK, res)
 }
 

@@ -309,6 +309,18 @@ type AdminRepository interface {
 	GetActiveBatchesCount(ctx context.Context) (int64, error)
 	GetTotalNotesCount(ctx context.Context) (int64, error)
 	GetRecordingsCount(ctx context.Context) (int64, error)
+
+	// Careers Repository Methods
+	ListActiveJobPositions(ctx context.Context) ([]JobPosition, error)
+	ListJobPositions(ctx context.Context) ([]JobPosition, error)
+	GetJobPositionByID(ctx context.Context, id int64) (*JobPosition, error)
+	CreateJobPosition(ctx context.Context, jp *JobPosition) error
+	UpdateJobPosition(ctx context.Context, id int64, updates map[string]interface{}) (*JobPosition, error)
+	DeleteJobPosition(ctx context.Context, id int64) error
+	ListJobApplications(ctx context.Context) ([]JobApplication, error)
+	GetJobApplicationByID(ctx context.Context, id int64) (*JobApplication, error)
+	CreateJobApplication(ctx context.Context, app *JobApplication) error
+	UpdateJobApplication(ctx context.Context, app *JobApplication) error
 }
 
 type AdminUsecase interface {
@@ -327,4 +339,58 @@ type AdminUsecase interface {
 	DeleteCategory(ctx context.Context, id int64) error
 	GetPlatformStats(ctx context.Context) (map[string]interface{}, error)
 	GetPlatformCategories(ctx context.Context) ([]string, error)
+
+	// Careers Usecase Methods
+	ListActiveJobPositions(ctx context.Context) ([]JobPosition, error)
+	CreateJobApplication(ctx context.Context, app *JobApplication) error
+	ListJobApplications(ctx context.Context) ([]JobApplication, error)
+	GetAdminPositions(ctx context.Context) ([]JobPosition, error)
+	CreateJobPosition(ctx context.Context, jp *JobPosition) error
+	UpdateJobPosition(ctx context.Context, id int64, updates map[string]interface{}) (*JobPosition, error)
+	DeleteJobPosition(ctx context.Context, id int64) error
+	SendCandidateNotification(ctx context.Context, id int64, emailType, meetingLink, interviewDatetime string, joiningLetterName string, joiningLetterData []byte) error
+}
+
+type JobPosition struct {
+	ID             int64     `gorm:"primaryKey;column:id" json:"id"`
+	Title          string    `gorm:"column:title" json:"title"`
+	Department     string    `gorm:"column:department" json:"department"`
+	Location       string    `gorm:"column:location" json:"location"`
+	EmploymentType string    `gorm:"column:employment_type" json:"employmentType"`
+	Description    string    `gorm:"column:description" json:"description"`
+	Requirements   string    `gorm:"column:requirements" json:"requirements"`
+	IsActive       bool      `gorm:"column:is_active;default:true" json:"isActive"`
+	CreatedAt      time.Time `gorm:"column:created_at;autoCreateTime" json:"createdAt"`
+	UpdatedAt      time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updatedAt"`
+}
+
+func (JobPosition) TableName() string {
+	return "job_positions"
+}
+
+type JobApplication struct {
+	ID                int64      `gorm:"primaryKey;column:id" json:"id"`
+	PositionID        *int64     `gorm:"column:position_id" json:"position"`
+	FullName          string     `gorm:"column:full_name" json:"fullName"`
+	Email             string     `gorm:"column:email" json:"email"`
+	Phone             string     `gorm:"column:phone" json:"phone"`
+	Qualification     string     `gorm:"column:qualification" json:"qualification"`
+	Branch            string     `gorm:"column:branch" json:"branch"`
+	PursuitStatus     string     `gorm:"column:pursuit_status;default:'passout'" json:"pursuitStatus"`
+	PassingYear       int        `gorm:"column:passing_year" json:"passingYear"`
+	CGPA              float64    `gorm:"column:cgpa" json:"cgpa"`
+	ApplyForRole      string     `gorm:"column:apply_for_role" json:"applyForRole"`
+	Specialization    string     `gorm:"column:specialization" json:"specialization"`
+	ExperienceYears   float64    `gorm:"column:experience_years;default:0.0" json:"experienceYears"`
+	ResumeURL         string     `gorm:"column:resume_url" json:"resumeUrl"`
+	PhotoURL          string     `gorm:"column:photo_url" json:"photoUrl"`
+	Status            string     `gorm:"column:status;default:'applied'" json:"status"`
+	MeetingLink       string     `gorm:"column:meeting_link;default:''" json:"meetingLink"`
+	InterviewDateTime *time.Time `gorm:"column:interview_datetime" json:"interviewDatetime"`
+	CreatedAt         time.Time  `gorm:"column:created_at;autoCreateTime" json:"createdAt"`
+	UpdatedAt         time.Time  `gorm:"column:updated_at;autoUpdateTime" json:"updatedAt"`
+}
+
+func (JobApplication) TableName() string {
+	return "job_applications"
 }

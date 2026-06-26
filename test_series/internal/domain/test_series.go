@@ -57,8 +57,10 @@ type TestSeries struct {
 	CourseID    *int64     `gorm:"column:course_id" json:"courseId"`
 	IsFree      bool       `gorm:"column:is_free;type:boolean;not null;default:false" json:"isFree"`
 	Price       float64    `gorm:"column:price;type:numeric(10,2);not null" json:"price"`
-	Slug        string     `gorm:"column:slug;type:varchar(100);uniqueIndex" json:"slug"`
-	HasAccess   bool       `json:"hasAccess" gorm:"-"`
+	Slug             string     `gorm:"column:slug;type:varchar(100);uniqueIndex" json:"slug"`
+	HasAccess        bool       `json:"hasAccess" gorm:"-"`
+	IsPurchased      bool       `json:"isPurchased" gorm:"-"`
+	IsPurchasedSnake bool       `json:"is_purchased" gorm:"-"`
 
 	// Preloaded list of tests
 	Tests []Test `gorm:"foreignKey:TestSeriesID" json:"tests,omitempty"`
