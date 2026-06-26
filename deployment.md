@@ -858,4 +858,45 @@ To run manual SQL queries on your VPS database:
 sudo -u postgres psql -d clasynq
 ```
 
+## STEP 25 — Performance Optimization & Connection Pooling
+
+To achieve sub-50ms API response times and ensure maximum database throughput under concurrent traffic, configure GORM's built-in `sql.DB` connection pool settings in all Go microservice `cmd/server/main.go` entrypoints.
+
+##### A. GORM Connection Pool Configuration
+
+Add the following snippet right after your GORM database initialization in each service's `main.go`:
+
+```go
+	db, err := gorm.Open(postgres.Open(cfg.DatabaseURL), &gorm.Config{
+		Logger: dbLogger,
+	})
+	if err != nil {
+		log.Fatalf("failed to connect to database: %v", err)
+	}
+
+	// Connection Pool Optimization (Tuning for pgBouncer & concurrent loads)
+	sqlDB, err := db.DB()
+	if err == nil {
+		// SetMaxIdleConns sets the maximum number of connections in the idle connection pool.
+		sqlDB.SetMaxIdleConns(10)
+		
+		// SetMaxOpenConns sets the maximum number of open connections to the database.
+		sqlDB.SetMaxOpenConns(100)
+		
+		// SetConnMaxLifetime sets the maximum amount of time a connection may be reused.
+		sqlDB.SetConnMaxLifetime(time.Hour)
+	}
+```
+
+##### B. Troubleshooting Slow Response Times (TTFB)
+
+If page loads or database queries are still slow, follow these diagnostic steps:
+1. **Check slow query logs**: GORM logs warnings for any queries taking longer than the `SlowThreshold` configured in your `dbLogger` (default is `1s`, decrease to `200ms` for debugging).
+2. **Monitor pgBouncer traffic**: Check if pgBouncer is actively recycling connections:
+   ```bash
+   netstat -tuln | grep 6432
+   ```
+3. **Inspect Chrome Network tab**: Look at the Time to First Byte (TTFB). If TTFB is low but page loading is slow, verify file assets (e.g. image compressions or static frontend rendering).
+
 ## End Of Production Guide
+
