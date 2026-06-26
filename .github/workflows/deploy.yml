@@ -1,0 +1,55 @@
+name: Deploy Go Microservices to Hostinger VPS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy and Build via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: clasynq
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          script: |
+            cd /home/clasynq/clasynq
+            
+            # 1. Fetch remote changes to compare
+            git fetch origin main
+            
+            # 2. Get list of files that will change
+            DIFF=$(git diff --name-only HEAD origin/main)
+            
+            # 3. Pull latest code
+            git pull origin main
+            
+            # 4. Check if we need to rebuild everything
+            REBUILD_ALL=false
+            if echo "$DIFF" | grep -qE "^(go\.mod|go\.sum|go\.work|go\.work\.sum|\.env)"; then
+                echo "Root workspace files changed. Rebuilding all services."
+                REBUILD_ALL=true
+            fi
+            
+            # 5. Build and restart services conditionally
+            services=("admin" "auth" "blog" "cbt_exam" "courses" "dashboard_profile" "enrollments" "notes" "teacher" "test_series")
+            
+            for svc in "${services[@]}"; do
+                if [ "$REBUILD_ALL" = true ] || echo "$DIFF" | grep -q "^$svc/"; then
+                    echo "=================================================="
+                    echo "Building and restarting service: $svc"
+                    echo "=================================================="
+                    
+                    # Compile binary
+                    bin_name="$svc-service"
+                    go build -o "/home/clasynq/services/bin/$bin_name" "./$svc/cmd/server/main.go"
+                    
+                    # Convert folder name underscore to dash for systemd service name
+                    svc_dashed=$(echo "$svc" | tr '_' '-')
+                    sudo systemctl restart "csq-$svc_dashed"
+                fi
+            done
