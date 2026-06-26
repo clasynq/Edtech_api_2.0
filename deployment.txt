@@ -603,8 +603,13 @@ Modify these properties:
 - `PasswordAuthentication no` (Force SSH Key logins only)
 - `PermitRootLogin no` (Disable direct root logins)
 - `Port 22022` (Move SSH port to 22022)
-Save the file and restart SSH:
+Save the file. Since newer Ubuntu versions (like Ubuntu 24.04 LTS) use systemd socket-based activation for SSH, restarting the traditional service won't update the listening port. You must reload systemd and restart the SSH socket:
 ```bash
+# Reload systemd and restart the SSH socket
+sudo systemctl daemon-reload
+sudo systemctl restart ssh.socket
+
+# Or, if using older Ubuntu versions:
 sudo systemctl restart ssh
 ```
 
