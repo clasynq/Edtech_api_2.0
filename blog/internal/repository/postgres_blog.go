@@ -241,32 +241,7 @@ func (r *postgresBlogRepository) GetCommentsForPost(ctx context.Context, postID 
 	if err != nil {
 		return nil, err
 	}
-
-	// Compile hierarchy
-	commentMap := make(map[int64]*domain.BlogComment)
-	var rootComments []domain.BlogComment
-
-	for i := range rawComments {
-		commentMap[rawComments[i].ID] = &rawComments[i]
-	}
-
-	for i := range rawComments {
-		c := &rawComments[i]
-		if c.ParentID == nil {
-			rootComments = append(rootComments, *c)
-		} else {
-			if parent, ok := commentMap[*c.ParentID]; ok {
-				parent.Replies = append(parent.Replies, *c)
-			}
-		}
-	}
-
-	// Update root comment replies recursively from map
-	for i := range rootComments {
-		rootComments[i] = *commentMap[rootComments[i].ID]
-	}
-
-	return rootComments, nil
+	return rawComments, nil
 }
 
 func (r *postgresBlogRepository) IncrementPostCounters(ctx context.Context, postID int64, updates map[string]interface{}, scoreDiff float64) error {
@@ -287,6 +262,12 @@ func (r *postgresBlogRepository) IncrementPostCounters(ctx context.Context, post
 
 func (r *postgresBlogRepository) CreateActivityLog(ctx context.Context, log *domain.ActivityLog) error {
 	return r.db.WithContext(ctx).Create(log).Error
+}
+
+func (r *postgresBlogRepository) GetActivityLogs(ctx context.Context, userID int64, limit int) ([]domain.ActivityLog, error) {
+	var logs []domain.ActivityLog
+	err := r.db.WithContext(ctx).Where("user_id = ?", userID).Order("timestamp desc").Limit(limit).Find(&logs).Error
+	return logs, err
 }
 
 func (r *postgresBlogRepository) RecordView(ctx context.Context, view *domain.PostView) error {
@@ -332,3 +313,61 @@ func (r *postgresBlogRepository) GetDistinctCategories(ctx context.Context) ([]s
 	err := r.db.WithContext(ctx).Model(&domain.BlogPost{}).Distinct("category").Pluck("category", &categories).Error
 	return categories, err
 }
+
+func (r *postgresBlogRepository) GetLatestPostView(ctx context.Context, postID int64, viewerIdentifier string) (*domain.PostView, error) {
+	var view domain.PostView
+	err := r.db.WithContext(ctx).Where("post_id = ? AND viewer_identifier = ?", postID, viewerIdentifier).Order("viewed_at desc").First(&view).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &view, nil
+}
+
+func (r *postgresBlogRepository) UpdatePostView(ctx context.Context, view *domain.PostView) error {
+	return r.db.WithContext(ctx).Save(view).Error
+}
+
+func (r *postgresBlogRepository) ToggleFollowUser(ctx context.Context, followerID, followedID int64) (bool, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Table("user_follows").Where("follower_id = ? AND followed_id = ?", followerID, followedID).Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+
+	if count > 0 {
+		// Delete
+		err = r.db.WithContext(ctx).Table("user_follows").Where("follower_id = ? AND followed_id = ?", followerID, followedID).Delete(nil).Error
+		return false, err
+	}
+
+	// Create
+	newFollow := map[string]interface{}{
+		"follower_id": followerID,
+		"followed_id": followedID,
+		"created_at":  time.Now(),
+	}
+	err = r.db.WithContext(ctx).Table("user_follows").Create(&newFollow).Error
+	return true, err
+}
+
+func (r *postgresBlogRepository) CreateNotification(ctx context.Context, notif *domain.UserNotification) error {
+	return r.db.WithContext(ctx).Create(notif).Error
+}
+
+func (r *postgresBlogRepository) GetUserRole(ctx context.Context, userID int64) (string, error) {
+	var count int64
+	// Check teachers table
+	if err := r.db.WithContext(ctx).Table("teachers").Where("id = ?", userID).Count(&count).Error; err == nil && count > 0 {
+		return "teacher", nil
+	}
+	// Check admin table
+	if err := r.db.WithContext(ctx).Table("admin").Where("id = ?", userID).Count(&count).Error; err == nil && count > 0 {
+		return "admin", nil
+	}
+	// Default to student
+	return "student", nil
+}
+

@@ -6,11 +6,10 @@ import (
 	"os"
 	"time"
 
-	"clasynq/api/auth/config"
-	delivery "clasynq/api/auth/internal/delivery/http"
-	"clasynq/api/auth/internal/repository"
-	"clasynq/api/auth/internal/scheduler"
-	"clasynq/api/auth/internal/usecase"
+	"clasynq/api/dashboard_profile/config"
+	delivery "clasynq/api/dashboard_profile/internal/delivery/http"
+	"clasynq/api/dashboard_profile/internal/repository"
+	"clasynq/api/dashboard_profile/internal/usecase"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
@@ -23,11 +22,11 @@ func main() {
 	// 1. Load config
 	cfg := config.LoadConfig()
 	if cfg.Port == "" {
-		cfg.Port = "8081"
+		cfg.Port = "8090" // Default port for the dashboard_profile service
 	}
 
-	log.Printf("Connecting to Postgres at: %s", cfg.DatabaseURL)
 	// 2. Connect to Postgres
+	log.Printf("Connecting to Postgres at: %s", cfg.DatabaseURL)
 	dbLogger := logger.New(
 		log.New(os.Stdout, "\r\n", log.LstdFlags),
 		logger.Config{
@@ -45,37 +44,35 @@ func main() {
 		log.Fatalf("failed to connect to database: %v", err)
 	}
 
-	// 3. Connect to Redis (optional/fail-safe open)
+	// 3. Connect to Redis (optional)
 	var rdb *redis.Client
 	if cfg.RedisURL != "" {
 		opt, err := redis.ParseURL(cfg.RedisURL)
 		if err == nil {
 			rdb = redis.NewClient(opt)
-			log.Println("Connected to Redis for active session limiting")
+			log.Println("Connected to Redis for session validation")
 		} else {
 			log.Printf("failed to parse Redis URL: %v", err)
 		}
 	}
 
 	// 4. Initialize layers
-	repo := repository.NewPostgresUserRepository(db)
-	uc := usecase.NewUserUsecase(repo, rdb, cfg)
-	handler := delivery.NewHttpHandler(uc, cfg.SecretKey, cfg.TurnstileSecretKey, rdb)
+	repo := repository.NewPostgresProfileRepository(db)
+	uc := usecase.NewProfileUsecase(repo)
+	handler := delivery.NewHttpHandler(uc)
 	authMiddleware := delivery.AuthMiddleware(cfg.SecretKey, rdb)
 
-	// Start Birthday Wish background scheduler
-	scheduler.StartBirthdayWishScheduler(db, cfg)
-
-	// 5. Initialize router & register routes
+	// 5. Initialize router & routes
 	r := gin.Default()
+
 	r.GET("/ping", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"message": "pong from auth service"})
+		c.JSON(http.StatusOK, gin.H{"message": "pong from dashboard_profile service"})
 	})
 
 	handler.RegisterRoutes(r, authMiddleware)
 
 	// 6. Start server
-	log.Printf("Starting auth service on port %s", cfg.Port)
+	log.Printf("Starting dashboard_profile service on port %s", cfg.Port)
 	if err := r.Run(":" + cfg.Port); err != nil {
 		log.Fatalf("failed to start server: %v", err)
 	}

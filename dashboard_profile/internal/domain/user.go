@@ -76,40 +76,6 @@ func (Teacher) TableName() string {
 	return "teachers"
 }
 
-type PendingRegistration struct {
-	Email         string    `gorm:"primaryKey;column:email;type:varchar(255)" json:"email"`
-	FullName      string    `gorm:"column:full_name;type:varchar(255);not null" json:"fullName"`
-	Username      string    `gorm:"column:username;type:varchar(30);unique;not null" json:"username"`
-	ContactNumber string    `gorm:"column:contact_number;type:varchar(32);not null" json:"contactNumber"`
-	PasswordHash  string    `gorm:"column:password_hash;type:varchar(128);not null" json:"-"`
-	CodeHash      string    `gorm:"column:code_hash;type:varchar(128);not null" json:"-"`
-	CodeExpiresAt time.Time `gorm:"column:code_expires_at;type:timestamp with time zone" json:"codeExpiresAt"`
-	Attempts      int       `gorm:"column:attempts;type:smallint;default:0" json:"attempts"`
-	ResendCount   int       `gorm:"column:resend_count;type:smallint;default:0" json:"resendCount"`
-	LastSentAt    time.Time `gorm:"column:last_sent_at;type:timestamp with time zone" json:"lastSentAt"`
-	CreatedAt     time.Time `gorm:"column:created_at;type:timestamp with time zone;autoCreateTime" json:"createdAt"`
-	UpdatedAt     time.Time `gorm:"column:updated_at;type:timestamp with time zone;autoUpdateTime" json:"updatedAt"`
-}
-
-func (PendingRegistration) TableName() string {
-	return "pending_registrations"
-}
-
-type PasswordResetOTP struct {
-	Email         string    `gorm:"primaryKey;column:email;type:varchar(255)" json:"email"`
-	CodeHash      string    `gorm:"column:code_hash;type:varchar(128);not null" json:"-"`
-	CodeExpiresAt time.Time `gorm:"column:code_expires_at;type:timestamp with time zone" json:"codeExpiresAt"`
-	Attempts      int       `gorm:"column:attempts;type:smallint;default:0" json:"attempts"`
-	ResendCount   int       `gorm:"column:resend_count;type:smallint;default:0" json:"resendCount"`
-	LastSentAt    time.Time `gorm:"column:last_sent_at;type:timestamp with time zone" json:"lastSentAt"`
-	CreatedAt     time.Time `gorm:"column:created_at;type:timestamp with time zone;autoCreateTime" json:"createdAt"`
-	UpdatedAt     time.Time `gorm:"column:updated_at;type:timestamp with time zone;autoUpdateTime" json:"updatedAt"`
-}
-
-func (PasswordResetOTP) TableName() string {
-	return "password_reset_otps"
-}
-
 type Follow struct {
 	ID         int64     `gorm:"primaryKey;column:id"`
 	FollowerID int64     `gorm:"column:follower_id;index:follower_followed_idx,unique;index:follower_idx;not null"`
@@ -123,17 +89,33 @@ func (Follow) TableName() string {
 	return "user_follows"
 }
 
+type ActivityLog struct {
+	ID           int64     `gorm:"primaryKey;column:id" json:"id"`
+	UserID       int64     `gorm:"column:user_id;not null;index" json:"userId"`
+	ActivityType string    `gorm:"column:activity_type;type:varchar(50);not null" json:"activityType"`
+	Description  string    `gorm:"column:description;type:text;not null" json:"description"`
+	Timestamp    time.Time `gorm:"column:timestamp;type:timestamp with time zone;autoCreateTime;index" json:"timestamp"`
+	TargetLink   *string   `gorm:"column:target_link;type:varchar(255)" json:"targetLink"`
+	Details      *string   `gorm:"column:details;type:text" json:"details"`
+}
+
+func (ActivityLog) TableName() string {
+	return "activity_logs"
+}
+
+type MutualConnection struct {
+	User        User
+	MutualCount int
+}
+
 type UserNotification struct {
 	ID               int64     `gorm:"primaryKey;column:id" json:"id"`
-	RecipientID      int64     `gorm:"column:recipient_id;index;not null" json:"recipientId"`
-	Recipient        User      `gorm:"foreignKey:RecipientID;constraint:OnDelete:CASCADE" json:"-"`
+	RecipientID      int64     `gorm:"column:recipient_id;not null;index" json:"recipientId"`
 	RecipientRole    string    `gorm:"column:recipient_role;type:varchar(50);default:'student'" json:"recipientRole"`
 	SenderID         *int64    `gorm:"column:sender_id;index" json:"senderId"`
-	Sender           *User     `gorm:"foreignKey:SenderID;constraint:OnDelete:SET NULL" json:"sender,omitempty"`
-	SenderName       string    `gorm:"-" json:"senderName"`
-	SenderAvatarUrl  string    `gorm:"-" json:"senderAvatarUrl"`
+	Sender           User      `gorm:"foreignKey:SenderID;constraint:OnDelete:SET NULL" json:"sender"`
 	NotificationType string    `gorm:"column:notification_type;type:varchar(50);default:'follow'" json:"notificationType"`
-	Message          string    `gorm:"column:message;type:text" json:"message"`
+	Message          string    `gorm:"column:message;type:text;not null" json:"message"`
 	IsRead           bool      `gorm:"column:is_read;type:boolean;default:false" json:"isRead"`
 	CreatedAt        time.Time `gorm:"column:created_at;type:timestamp with time zone;autoCreateTime" json:"createdAt"`
 }
@@ -142,59 +124,24 @@ func (UserNotification) TableName() string {
 	return "user_notifications"
 }
 
-type UserRepository interface {
+type ProfileRepository interface {
 	GetUserByID(ctx context.Context, id int64) (*User, error)
-	GetUserByEmail(ctx context.Context, email string) (*User, error)
-	GetUserByUsername(ctx context.Context, username string) (*User, error)
-	GetUserByContact(ctx context.Context, contact string) (*User, error)
-	SearchUsers(ctx context.Context, query string) ([]User, error)
-	UpdateUser(ctx context.Context, user *User) error
-
-	IsStudent(ctx context.Context, userID int64) (bool, error)
-	GetStudentProfile(ctx context.Context, userID int64) (*Student, error)
 	GetStudentReferralsCount(ctx context.Context, userID int64) (int64, error)
-
-	GetAdminByEmail(ctx context.Context, email string) (*Admin, error)
-	GetTeacherByEmail(ctx context.Context, email string) (*Teacher, error)
-	GetTeacherByID(ctx context.Context, id int64) (*Teacher, error)
-	GetAdminByID(ctx context.Context, id int64) (*Admin, error)
-
-	GetPendingRegistration(ctx context.Context, email string) (*PendingRegistration, error)
-	SavePendingRegistration(ctx context.Context, pending *PendingRegistration) error
-	DeletePendingRegistration(ctx context.Context, email string) error
-	CreateUserFromPending(ctx context.Context, pending *PendingRegistration) (*User, error)
-
-	GetPasswordResetOTP(ctx context.Context, email string) (*PasswordResetOTP, error)
-	SavePasswordResetOTP(ctx context.Context, reset *PasswordResetOTP) error
-	DeletePasswordResetOTP(ctx context.Context, email string) error
-
-	GetFollowRelationship(ctx context.Context, followerID, followedID int64) (*Follow, error)
-	FollowUser(ctx context.Context, followerID, followedID int64) error
-	UnfollowUser(ctx context.Context, followerID, followedID int64) error
 	GetFollowersList(ctx context.Context, userID int64) ([]Follow, error)
 	GetFollowingList(ctx context.Context, userID int64) ([]Follow, error)
-
-	GetNotifications(ctx context.Context, userID int64, role string) ([]UserNotification, error)
-	MarkNotificationsAsRead(ctx context.Context, userID int64, role string) error
+	GetFollowRelationship(ctx context.Context, followerID, followedID int64) (*Follow, error)
+	UpdateUser(ctx context.Context, user *User) error
+	GetTeacherByID(ctx context.Context, id int64) (*Teacher, error)
+	GetAdminByID(ctx context.Context, id int64) (*Admin, error)
+	ToggleFollowUser(ctx context.Context, followerID, followedID int64) (bool, error)
+	GetMutualConnections(ctx context.Context, userID int64) ([]MutualConnection, error)
+	CreateActivityLog(ctx context.Context, log *ActivityLog) error
 	CreateNotification(ctx context.Context, notif *UserNotification) error
-	UpdateAdminPassword(ctx context.Context, id int64, newHash string) error
-	UpdateTeacherPassword(ctx context.Context, id int64, newHash string) error
 }
 
-type UserUsecase interface {
-	Register(ctx context.Context, fullName, username, email, contact, password, remoteIP string) (map[string]interface{}, error)
-	VerifyOTP(ctx context.Context, email, code string) (map[string]interface{}, error)
-	ResendOTP(ctx context.Context, email string) (map[string]interface{}, error)
-	Login(ctx context.Context, emailOrUsername, password, remoteIP string) (map[string]interface{}, error)
-	ForgotPassword(ctx context.Context, email string) (map[string]interface{}, error)
-	ResetPassword(ctx context.Context, email, code, newPassword string) (map[string]interface{}, error)
+type ProfileUsecase interface {
 	GetMe(ctx context.Context, userID int64, role string) (map[string]interface{}, error)
 	UpdateMe(ctx context.Context, userID int64, updates map[string]interface{}) (map[string]interface{}, error)
-	ChangePassword(ctx context.Context, userID int64, oldPassword, newPassword string) error
-	SearchUsers(ctx context.Context, query string) ([]map[string]interface{}, error)
-	FollowUser(ctx context.Context, followerID, followedID int64) error
-	UnfollowUser(ctx context.Context, followerID, followedID int64) error
-	GetNotifications(ctx context.Context, userID int64, role string) ([]UserNotification, error)
-	MarkNotificationsAsRead(ctx context.Context, userID int64, role string) error
-	TokenRefresh(ctx context.Context, refreshToken string) (map[string]string, error)
+	GetMutualConnections(ctx context.Context, userID int64) (map[string]interface{}, error)
+	ToggleFollowUser(ctx context.Context, followerID, followedID int64) (bool, error)
 }

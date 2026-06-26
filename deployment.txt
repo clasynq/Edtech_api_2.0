@@ -1,0 +1,843 @@
+================================================================================
+FULL GOLANG MICROSERVICES VPS DEPLOYMENT & PRODUCTION GUIDE
+================================================================================
+Project: Clasynq LMS (Go Microservices Backend & React Frontend)
+Author: Surajit Sutradhar
+Updated for: 10 Go Microservices, pgBouncer Database Pooling, Redis Caching, 
+             and Nginx API Gateway routing.
+================================================================================
+
+FINAL PRODUCTION ARCHITECTURE
+================================================================================
+User Request 
+   ↓
+[ www.clasynq.in ] (Render Frontend - React)
+   ↓ (API Calls direct to VPS IP via Cloudflare DNS)
+[ VPS: Nginx Reverse Proxy / API Gateway (Port 443) ]
+   ├── /api/auth/*             → proxy_pass http://127.0.0.1:8081
+   ├── /api/courses/*          → proxy_pass http://127.0.0.1:8082
+   ├── /api/classes/*          → proxy_pass http://127.0.0.1:8082
+   ├── /api/payments/*         → proxy_pass http://127.0.0.1:8083
+   ├── /payment/*              → proxy_pass http://127.0.0.1:8083
+   ├── /api/notes/*            → proxy_pass http://127.0.0.1:8084
+   ├── /api/test-series/*      → proxy_pass http://127.0.0.1:8085
+   ├── /api/tests/*            → proxy_pass http://127.0.0.1:8085
+   ├── /api/questions/*        → proxy_pass http://127.0.0.1:8085
+   ├── /api/blog/*             → proxy_pass http://127.0.0.1:8086
+   ├── /api/cbt/*              → proxy_pass http://127.0.0.1:8087
+   ├── /api/test-attempts/*    → proxy_pass http://127.0.0.1:8087
+   ├── /api/results/*          → proxy_pass http://127.0.0.1:8087
+   ├── /api/admin/*            → proxy_pass http://127.0.0.1:8088
+   ├── /api/platform/*         → proxy_pass http://127.0.0.1:8088
+   ├── /api/teacher/*          → proxy_pass http://127.0.0.1:8089
+   ├── /api/me/change-password → proxy_pass http://127.0.0.1:8081 (auth)
+   ├── /api/me/notifications   → proxy_pass http://127.0.0.1:8081 (auth)
+   ├── /api/me/follow/         → proxy_pass http://127.0.0.1:8081 (auth)
+   ├── /api/me/unfollow/       → proxy_pass http://127.0.0.1:8081 (auth)
+   ├── /api/me/enrollments     → proxy_pass http://127.0.0.1:8083 (enrollments)
+   ├── /api/me/*               → proxy_pass http://127.0.0.1:8090 (dashboard_profile)
+   └── /media/*                → Served statically by Nginx alias
+================================================================================
+
+MICROSERVICE ROUTING & PORTS
+================================================================================
+| Service Folder       | Port | Default API Routes                                 |
+| :---                 | :--- | :---                                               |
+| `auth`               | 8081 | /api/auth/*, /api/me (change-password, notify)     |
+| `courses`            | 8082 | /api/courses/*, /api/classes/*                     |
+| `enrollments`        | 8083 | /api/payments/*, /payment/*, /api/me/enrollments   |
+| `notes`              | 8084 | /api/notes/*                                       |
+| `test_series`        | 8085 | /api/test-series/*, /api/tests/*, /api/questions/* |
+| `blog`               | 8086 | /api/blog/*                                        |
+| `cbt_exam`           | 8087 | /api/cbt/*, /api/test-attempts/*, /api/results/*   |
+| `admin`              | 8088 | /api/admin/*, /api/platform/*                      |
+| `teacher`            | 8089 | /api/teacher/*                                     |
+| `dashboard_profile`  | 8090 | /api/me/* (Profile CRUD, FollowToggle, avatar)     |
+================================================================================
+
+STEP 1 — BUY VPS
+================================================================================
+Purchase a Hostinger VPS.
+Recommended minimum specifications for Go microservices (much lighter than Django):
+- KVM 2 Plan
+- 2 vCPU Cores
+- 8 GB RAM (Allows comfortable concurrent Go compilation and caching)
+- 100 GB NVMe SSD
+Choose OS: Ubuntu 24.04 LTS (Minimal)
+
+STEP 2 — SSH CONNECT TO VPS
+================================================================================
+From your local command line:
+```powershell
+ssh root@YOUR_SERVER_IP
+```
+
+STEP 3 — CREATE SECURED USER
+================================================================================
+Never run your applications as the root user. Create a dedicated user with sudo privileges:
+```bash
+# Create user
+adduser clasynq
+
+# Grant sudo permissions
+usermod -aG sudo clasynq
+
+# Switch to the new user
+su - clasynq
+```
+
+STEP 4 — UPDATE AND UPGRADE PACKAGES
+================================================================================
+Update the system's package catalog and install upgrades:
+```bash
+sudo apt update && sudo apt upgrade -y
+```
+
+STEP 5 — INSTALL SYSTEM PACKAGES & GO
+================================================================================
+Install required dependencies, databases, servers, and utilities. Since we are running Go, we will also install Go 1.26.1 officially (do not use default apt-get golang as it is outdated):
+```bash
+sudo apt install git nginx postgresql postgresql-contrib redis-server fail2ban certbot python3-certbot-nginx pgbouncer -y
+```
+
+##### Install Go 1.26.1:
+```bash
+wget https://go.dev/dl/go1.26.1.linux-amd64.tar.gz
+sudo rm -rf /usr/local/go
+sudo tar -C /usr/local -xzf go1.26.1.linux-amd64.tar.gz
+
+# Add Go to user PATH (append to ~/.profile or ~/.bashrc)
+echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
+source ~/.bashrc
+
+# Verify installation:
+go version
+# Output should return: go version go1.26.1 linux/amd64
+```
+
+STEP 6 — SETUP SSH KEYS FOR GITHUB
+================================================================================
+Generate a secure Ed25519 key pair to safely authenticate git pulls:
+```bash
+ssh-keygen -t ed25519 -C "github-action-deploy"
+# Press Enter for all prompts to keep it passwordless for automation
+
+# Print your public key and copy it:
+cat ~/.ssh/id_ed25519.pub
+```
+1. Go to **GitHub -> Repository -> Settings -> Deploy Keys -> Add Deploy Key**.
+2. Paste the key and name it `vps-deploy-key`.
+3. Test connection:
+   ```bash
+   ssh -T git@github.com
+   ```
+
+STEP 7 — CLONE PROJECT AND PREPARE BINARY DIRECTORY
+================================================================================
+Clone your codebase and navigate to the project directory:
+```bash
+git clone git@github.com:YOUR_USERNAME/REPO.git /home/clasynq/clasynq
+cd /home/clasynq/clasynq
+
+# Create folder structure for compiled Go binaries
+mkdir -p /home/clasynq/services/bin
+```
+
+STEP 8 — CONFIGURATION OF POSTGRESQL
+================================================================================
+Log into PostgreSQL console and configure your dedicated, isolated user:
+```bash
+sudo -u postgres psql
+```
+Execute the following commands inside the psql console:
+```sql
+CREATE USER clasynq WITH PASSWORD 'YOUR_SECURE_DB_PASSWORD';
+CREATE DATABASE clasynq OWNER clasynq;
+GRANT ALL PRIVILEGES ON DATABASE clasynq TO clasynq;
+\q
+```
+
+STEP 9 — CONFIGURATION OF REDIS CACHE
+================================================================================
+Start and enable the Redis server locally:
+```bash
+sudo systemctl start redis-server
+sudo systemctl enable redis-server
+
+# Verify that the server is listening:
+redis-cli ping
+# Output should return: PONG
+```
+
+> [!NOTE]
+> This local Redis server is used for active session validation, Redis-based token caching, and Turnstile registration OTP state checks. It avoids database table lock overhead entirely.
+
+STEP 10 — CREATE SYSTEM ENVIRONMENT VARIABLES (.env)
+================================================================================
+Create a single unified `.env` configuration file in the project root folder. All Go microservices will load shared database/Redis connection details and security keys from this single file via systemd:
+```bash
+nano /home/clasynq/clasynq/.env
+```
+Paste and fill in the following parameters:
+```env
+DJANGO_DEBUG=False
+SECRET_KEY=YOUR_PRODUCTION_DJANGO_SECRET_KEY
+DJANGO_SECRET_KEY=YOUR_PRODUCTION_DJANGO_SECRET_KEY
+DJANGO_ALLOWED_HOSTS=api.clasynq.in
+DJANGO_CORS_ALLOWED_ORIGINS=https://www.clasynq.in,https://clasynq.in
+
+# Database (Connecting through pgBouncer port 6432 for high performance connection pooling)
+DATABASE_URL=postgresql://clasynq:YOUR_SECURE_DB_PASSWORD@localhost:6432/clasynq
+
+# Redis & Session Store
+REDIS_URL=redis://127.0.0.1:6379/1
+
+# Authentication Lifetimes (Highly Secure)
+ACCESS_TOKEN_EXPIRE_MINUTES=15
+REFRESH_TOKEN_EXPIRE_DAYS=365
+
+# Third-party Integrations
+CLOUDINARY_CLOUD_NAME=dwonm6qei
+CLOUDINARY_API_KEY=YOUR_CLOUDINARY_API_KEY
+CLOUDINARY_API_SECRET=YOUR_CLOUDINARY_API_SECRET
+RAZORPAY_KEY_ID=rzp_live_YOUR_KEY_ID
+RAZORPAY_KEY_SECRET=YOUR_RAZORPAY_KEY_SECRET
+RAZORPAY_WEBHOOK_SECRET=YOUR_RAZORPAY_WEBHOOK_SECRET
+TURNSTILE_SECRET_KEY=YOUR_CLOUDFLARE_TURNSTILE_SECRET_KEY
+
+# Email Backend (Brevo SMTP)
+EMAIL_HOST=smtp-relay.brevo.com
+EMAIL_PORT=587
+EMAIL_HOST_USER=YOUR_BREVO_EMAIL_USER
+EMAIL_HOST_PASSWORD=YOUR_BREVO_SMTP_KEY
+DEFAULT_FROM_EMAIL=clasynq@gmail.com
+FRONTEND_URL=https://www.clasynq.in
+BASE_URL=http://localhost:8000
+
+# Performance & Security Controls
+DISABLE_RATE_LIMITING=False
+
+# Media Directory Configuration (Points all services to the shared media folder)
+MEDIA_ROOT=/home/clasynq/Medias/
+```
+
+STEP 11 — BUILD THE GO MICROSERVICES
+================================================================================
+Navigate to the root workspace folder (where `go.work` resides) and download dependencies, then compile all 10 microservices:
+```bash
+cd /home/clasynq/clasynq
+go mod download
+
+# Build auth
+go build -o /home/clasynq/services/bin/auth-service ./auth/cmd/server/main.go
+# Build courses
+go build -o /home/clasynq/services/bin/courses-service ./courses/cmd/server/main.go
+# Build enrollments
+go build -o /home/clasynq/services/bin/enrollments-service ./enrollments/cmd/server/main.go
+# Build notes
+go build -o /home/clasynq/services/bin/notes-service ./notes/cmd/server/main.go
+# Build test_series
+go build -o /home/clasynq/services/bin/test_series-service ./test_series/cmd/server/main.go
+# Build blog
+go build -o /home/clasynq/services/bin/blog-service ./blog/cmd/server/main.go
+# Build cbt_exam
+go build -o /home/clasynq/services/bin/cbt_exam-service ./cbt_exam/cmd/server/main.go
+# Build admin
+go build -o /home/clasynq/services/bin/admin-service ./admin/cmd/server/main.go
+# Build teacher
+go build -o /home/clasynq/services/bin/teacher-service ./teacher/cmd/server/main.go
+# Build dashboard_profile
+go build -o /home/clasynq/services/bin/dashboard_profile-service ./dashboard_profile/cmd/server/main.go
+```
+
+STEP 12 — CREATE SYSTEMD SERVICES FOR GO MICROSERVICES
+================================================================================
+Create individual daemon service files for each of the 10 Go microservices so they run continuously in the background and auto-restart.
+
+We will write a systemd configuration file for each service using a unified template.
+Create `/etc/systemd/system/csq-auth.service` as an example:
+```bash
+sudo nano /etc/systemd/system/csq-auth.service
+```
+Paste this configuration (adjusting the `PORT` environment override for each specific service):
+```ini
+[Unit]
+Description=Clasynq Auth Microservice
+After=network.target redis-server.service postgresql.service pgbouncer.service
+
+[Service]
+User=clasynq
+Group=www-data
+WorkingDirectory=/home/clasynq/clasynq
+EnvironmentFile=/home/clasynq/clasynq/.env
+Environment="PORT=8081"
+ExecStart=/home/clasynq/services/bin/auth-service
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Create similar unit files for the remaining services:
+- `/etc/systemd/system/csq-courses.service` (Environment="PORT=8082", ExecStart=/home/clasynq/services/bin/courses-service)
+- `/etc/systemd/system/csq-enrollments.service` (Environment="PORT=8083", ExecStart=/home/clasynq/services/bin/enrollments-service)
+- `/etc/systemd/system/csq-notes.service` (Environment="PORT=8084", ExecStart=/home/clasynq/services/bin/notes-service)
+- `/etc/systemd/system/csq-test-series.service` (Environment="PORT=8085", ExecStart=/home/clasynq/services/bin/test_series-service)
+- `/etc/systemd/system/csq-blog.service` (Environment="PORT=8086", ExecStart=/home/clasynq/services/bin/blog-service)
+- `/etc/systemd/system/csq-cbt-exam.service` (Environment="PORT=8087", ExecStart=/home/clasynq/services/bin/cbt_exam-service)
+- `/etc/systemd/system/csq-admin.service` (Environment="PORT=8088", ExecStart=/home/clasynq/services/bin/admin-service)
+- `/etc/systemd/system/csq-teacher.service` (Environment="PORT=8089", ExecStart=/home/clasynq/services/bin/teacher-service)
+- `/etc/systemd/system/csq-dashboard-profile.service` (Environment="PORT=8090", ExecStart=/home/clasynq/services/bin/dashboard_profile-service)
+
+##### Start and Enable All Services:
+```bash
+sudo systemctl daemon-reload
+
+# Enable all microservices to start on boot
+sudo systemctl enable csq-auth csq-courses csq-enrollments csq-notes csq-test-series csq-blog csq-cbt-exam csq-admin csq-teacher csq-dashboard-profile
+
+# Start all microservices
+sudo systemctl start csq-auth csq-courses csq-enrollments csq-notes csq-test-series csq-blog csq-cbt-exam csq-admin csq-teacher csq-dashboard-profile
+
+# Verify status of a service (should show Active: active (running))
+sudo systemctl status csq-auth
+```
+
+STEP 13 — NGINX REVERSE PROXY & API GATEWAY SETUP
+================================================================================
+Configure Nginx to act as the primary API Gateway routing requests to the corresponding Go microservices by checking URL path prefixes:
+```bash
+sudo nano /etc/nginx/sites-available/clasynq
+```
+Paste this configuration:
+```nginx
+server {
+    listen 80;
+    server_name api.clasynq.in;
+    client_max_body_size 100M;
+
+    location = /favicon.ico { access_log off; log_not_found off; }
+
+    # Serve static media files directly via Nginx
+    location /media/ {
+        alias /home/clasynq/Medias/;
+        expires 7d;
+        access_log off;
+        add_header Access-Control-Allow-Origin *;
+    }
+
+    # 1. Auth Service Routes (Port 8081)
+    location /api/auth/ {
+        limit_req zone=strict_auth_limit burst=5 nodelay;
+        proxy_pass http://127.0.0.1:8081;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+    }
+
+    # Auth subpath specific overrides (routed to Port 8081)
+    location /api/me/change-password {
+        proxy_pass http://127.0.0.1:8081;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+    location /api/me/notifications {
+        proxy_pass http://127.0.0.1:8081;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+    location /api/me/follow/ {
+        proxy_pass http://127.0.0.1:8081;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+    location /api/me/unfollow/ {
+        proxy_pass http://127.0.0.1:8081;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    # 2. Courses Service Routes (Port 8082)
+    location /api/courses/ {
+        limit_req zone=anon_api_limit burst=15 nodelay;
+        proxy_pass http://127.0.0.1:8082;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+    location /api/classes/ {
+        limit_req zone=anon_api_limit burst=15 nodelay;
+        proxy_pass http://127.0.0.1:8082;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    # 3. Enrollments & Payments Service Routes (Port 8083)
+    location /api/payments/ {
+        proxy_pass http://127.0.0.1:8083;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+    location /payment/ {
+        proxy_pass http://127.0.0.1:8083;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+    location /api/me/enrollments {
+        proxy_pass http://127.0.0.1:8083;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    # 4. Notes Service Routes (Port 8084)
+    location /api/notes/ {
+        limit_req zone=anon_api_limit burst=15 nodelay;
+        proxy_pass http://127.0.0.1:8084;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    # 5. Test Series Service Routes (Port 8085)
+    location /api/test-series/ {
+        limit_req zone=anon_api_limit burst=15 nodelay;
+        proxy_pass http://127.0.0.1:8085;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+    location /api/tests/ {
+        limit_req zone=anon_api_limit burst=15 nodelay;
+        proxy_pass http://127.0.0.1:8085;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+    location /api/questions/ {
+        limit_req zone=anon_api_limit burst=15 nodelay;
+        proxy_pass http://127.0.0.1:8085;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    # 6. Blog Service Routes (Port 8086)
+    location /api/blog/ {
+        limit_req zone=anon_api_limit burst=15 nodelay;
+        proxy_pass http://127.0.0.1:8086;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    # 7. CBT Exam Service Routes (Port 8087)
+    location /api/cbt/ {
+        limit_req zone=anon_api_limit burst=15 nodelay;
+        proxy_pass http://127.0.0.1:8087;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+    location /api/test-attempts/ {
+        limit_req zone=anon_api_limit burst=15 nodelay;
+        proxy_pass http://127.0.0.1:8087;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+    location /api/results/ {
+        limit_req zone=anon_api_limit burst=15 nodelay;
+        proxy_pass http://127.0.0.1:8087;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    # 8. Admin Service Routes (Port 8088)
+    location /api/admin/ {
+        proxy_pass http://127.0.0.1:8088;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+    location /api/platform/ {
+        limit_req zone=anon_api_limit burst=15 nodelay;
+        proxy_pass http://127.0.0.1:8088;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    # 9. Teacher Service Routes (Port 8089)
+    location /api/teacher/ {
+        proxy_pass http://127.0.0.1:8089;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    # 10. Dashboard Profile Service Routes (Port 8090)
+    # Longest prefix rule will prioritize change-password/notifications to auth service
+    location /api/me/ {
+        proxy_pass http://127.0.0.1:8090;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}
+```
+
+Link and enable the server block:
+```bash
+sudo ln -s /etc/nginx/sites-available/clasynq /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl restart nginx
+```
+
+STEP 14 — DOMAIN DNS CONFIGURATION (CLOUDFLARE)
+================================================================================
+Configure your records inside the Cloudflare DNS Dashboard:
+- **A Record** (for Go API Gateway):
+  - **Type**: `A`
+  - **Name**: `api`
+  - **IPv4 address**: `YOUR_VPS_IP`
+  - **Proxy Status**: Proxied (Orange Cloud)
+- **CNAME Record** (for Render Frontend):
+  - **Type**: `CNAME`
+  - **Name**: `www`
+  - **Target**: Your Render deployment URL (e.g., `clasynq-02.onrender.com`)
+  - **Proxy Status**: Proxied (Orange Cloud)
+
+STEP 15 — RENDER FRONTEND DEPLOYMENT
+================================================================================
+Deploy your React frontend to Render with these settings:
+- **Build Command**: `npm install && npm run build`
+- **Publish Directory**: `dist`
+- **Environment Variables**:
+  - `VITE_API_URL=https://api.clasynq.in`
+- **Redirects/Rewrites Rules (Crucial for Single Page Application routing)**:
+  - **Source**: `/*`
+  - **Destination**: `/index.html`
+  - **Action**: `Rewrite`
+
+STEP 16 — ACQUIRE HTTPS SSL CERTIFICATE
+================================================================================
+Use Certbot to request a free Let's Encrypt certificate for Nginx:
+```bash
+sudo certbot --nginx -d api.clasynq.in
+# Choose option to redirect HTTP to HTTPS automatically if asked
+```
+
+STEP 17 — INFRASTRUCTURE SECURITY HARDENING
+================================================================================
+##### A. Configure Fail2Ban (SSH Brute-force Prevention)
+```bash
+sudo systemctl enable fail2ban
+sudo systemctl start fail2ban
+```
+
+##### B. Harden SSH Config
+```bash
+sudo nano /etc/ssh/sshd_config
+```
+Modify these properties:
+- `PasswordAuthentication no` (Force SSH Key logins only)
+- `PermitRootLogin no` (Disable direct root logins)
+- `Port 22022` (Move SSH port to 22022)
+Save the file and restart SSH:
+```bash
+sudo systemctl restart ssh
+```
+
+##### C. UFW Firewall Setup
+```bash
+sudo ufw allow 22022/tcp
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw enable
+```
+
+STEP 18 — GITHUB ACTIONS AUTO DEPLOYMENT
+================================================================================
+Configure GitHub actions to build and reload Go microservices on commit.
+
+1. Configure `clasynq` user to allow restarting systemd services without password prompt:
+   ```bash
+   sudo visudo
+   ```
+   Add this at the end of the file:
+   ```text
+   clasynq ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart csq-*
+   ```
+
+2. Inside your repository, create `.github/workflows/deploy.yml`:
+```yaml
+name: Deploy Go Microservices to Hostinger VPS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy and Build via SSH
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: clasynq
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22022
+          script: |
+            cd /home/clasynq/clasynq
+            git pull origin main
+            
+            # Run clean builds for all Go services
+            go build -o /home/clasynq/services/bin/admin-service ./admin/cmd/server/main.go
+            go build -o /home/clasynq/services/bin/auth-service ./auth/cmd/server/main.go
+            go build -o /home/clasynq/services/bin/blog-service ./blog/cmd/server/main.go
+            go build -o /home/clasynq/services/bin/cbt_exam-service ./cbt_exam/cmd/server/main.go
+            go build -o /home/clasynq/services/bin/courses-service ./courses/cmd/server/main.go
+            go build -o /home/clasynq/services/bin/dashboard_profile-service ./dashboard_profile/cmd/server/main.go
+            go build -o /home/clasynq/services/bin/enrollments-service ./enrollments/cmd/server/main.go
+            go build -o /home/clasynq/services/bin/notes-service ./notes/cmd/server/main.go
+            go build -o /home/clasynq/services/bin/teacher-service ./teacher/cmd/server/main.go
+            go build -o /home/clasynq/services/bin/test_series-service ./test_series/cmd/server/main.go
+            
+            # Restart all 10 Go daemons
+            sudo systemctl restart csq-admin csq-auth csq-blog csq-cbt-exam csq-courses csq-dashboard-profile csq-enrollments csq-notes csq-teacher csq-test-series
+```
+
+3. Go to **GitHub -> Repository -> Settings -> Secrets and Variables -> Actions -> New repository secret**:
+   - `VPS_HOST`: Add your VPS IP Address.
+   - `VPS_SSH_KEY`: Add the raw content of your private SSH key (`cat ~/.ssh/id_ed25519` from VPS).
+
+STEP 19 — AUTOMATED DAILY POSTGRESQL BACKUPS
+================================================================================
+Set up automated daily backups:
+1. Create a backups directory:
+   ```bash
+   mkdir -p /home/clasynq/db_backups
+   ```
+2. Open crontab manager:
+   ```bash
+   crontab -e
+   ```
+3. Paste this at the bottom (backs up daily at 02:00 AM):
+   ```text
+   0 2 * * * pg_dump -U clasynq clasynq > /home/clasynq/db_backups/backup_$(date +\%F).sql
+   ```
+
+STEP 20 — PRODUCTION MONITORING & LOGS
+================================================================================
+Monitor live logs for any of the 10 Go services:
+```bash
+# Live logs for auth service
+sudo journalctl -u csq-auth -f
+
+# Live logs for courses service
+sudo journalctl -u csq-courses -f
+
+# Live logs for profile dashboard service
+sudo journalctl -u csq-dashboard-profile -f
+
+# Check Nginx access and error logs
+sudo tail -f /var/log/nginx/access.log
+sudo tail -f /var/log/nginx/error.log
+```
+
+STEP 21 — RAZORPAY PAYMENT GATEWAY & WEBHOOK CONFIGURATION
+================================================================================
+##### A. Generate Live API Keys
+1. Go to the [Razorpay Dashboard](https://dashboard.razorpay.com) and switch to **Live Mode**.
+2. Navigate to **Account & Settings** -> **API Keys** -> **Generate Live Key**.
+
+##### B. Create Live Webhook
+To ensure enrollments are processed successfully, configure a webhook:
+1. Go to the Razorpay Dashboard -> **Account & Settings** -> **Webhooks** -> **Add New Webhook**.
+2. Configuration:
+   - **Webhook URL**: `https://api.clasynq.in/api/payments/webhook/`
+   - **Secret**: A strong cryptographically secure random string.
+   - **Active Events**: `order.paid` and `payment.captured`.
+
+##### C. Update VPS Environment Variables
+Update `/home/clasynq/clasynq/.env` with your live credentials:
+```env
+RAZORPAY_KEY_ID=rzp_live_YOUR_LIVE_KEY_ID
+RAZORPAY_KEY_SECRET=YOUR_LIVE_KEY_SECRET
+RAZORPAY_WEBHOOK_SECRET=YOUR_LIVE_WEBHOOK_SECRET
+```
+Save the file and restart your enrollments daemon:
+```bash
+sudo systemctl restart csq-enrollments
+```
+
+STEP 22 — DEPLOYING PGBOUNCER FOR DATABASE POOLING
+================================================================================
+To handle 10,000+ database connections without PostgreSQL connection exhaustion:
+
+1. **Configure pgBouncer**:
+   ```bash
+   sudo nano /etc/pgbouncer/pgbouncer.ini
+   ```
+   Set up correct connection parameters inside the `[databases]` section:
+   ```ini
+   [databases]
+   clasynq = host=127.0.0.1 port=5432 dbname=clasynq user=clasynq
+   ```
+
+2. **Add authorized users**:
+   ```bash
+   sudo nano /etc/pgbouncer/userlist.txt
+   ```
+   Add database users:
+   ```text
+   "clasynq" "YOUR_SECURE_DB_PASSWORD"
+   ```
+
+3. **Restart and enable pgBouncer**:
+   ```bash
+   sudo systemctl restart pgbouncer
+   sudo systemctl enable pgbouncer
+   
+   # Verify that pgBouncer is listening on port 6432:
+   netstat -tuln | grep 6432
+   ```
+
+STEP 23 — CLOUDFLARE SETUP & RESTORING REAL CLIENT IPS
+================================================================================
+##### A. Configure SSL/TLS Mode
+Log into Cloudflare, go to **SSL/TLS -> Overview** and set encryption mode to **Flexible**.
+
+##### B. Set Up Nginx Real IP & Rate Limiting Module
+Open the main Nginx configuration file:
+```bash
+sudo nano /etc/nginx/nginx.conf
+```
+Paste inside the `http { ... }` block to trust Cloudflare IP ranges:
+```nginx
+set_real_ip_from 103.21.244.0/22;
+set_real_ip_from 103.22.200.0/22;
+set_real_ip_from 103.31.4.0/22;
+set_real_ip_from 104.16.0.0/13;
+set_real_ip_from 104.24.0.0/14;
+set_real_ip_from 108.162.192.0/18;
+set_real_ip_from 131.0.72.0/22;
+set_real_ip_from 141.101.64.0/18;
+set_real_ip_from 172.64.0.0/13;
+set_real_ip_from 173.245.48.0/20;
+set_real_ip_from 188.114.96.0/20;
+set_real_ip_from 190.93.240.0/20;
+set_real_ip_from 197.234.240.0/22;
+set_real_ip_from 198.41.128.0/17;
+set_real_ip_from 2400:cb00::/32;
+set_real_ip_from 2606:4700::/32;
+set_real_ip_from 2803:f800::/32;
+set_real_ip_from 2405:b500::/32;
+set_real_ip_from 2405:8100::/32;
+set_real_ip_from 2a06:98c0::/29;
+set_real_ip_from 2c0f:f248::/32;
+
+real_ip_header CF-Connecting-IP;
+
+# Rate Limiting Map (Bypasses limits for OPTIONS and Premium tiers)
+map "$request_method:$http_x_user_tier" $limit_key {
+    default $binary_remote_addr;
+    "~^OPTIONS:" "";
+    "~*^[^:]+:Premium" "";
+}
+
+# Define zones
+limit_req_zone $limit_key zone=anon_api_limit:10m rate=5r/s;
+limit_req_zone $binary_remote_addr zone=strict_auth_limit:10m rate=1r/s;
+```
+Reload Nginx:
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+STEP 24 — CENTRALIZED DATABASE MANAGEMENT TOOL (MIGRATIONS & FLUSH)
+================================================================================
+To make the transition from Django seamless, a centralized database management utility is provided at the root folder via `./manage.ps1` (for Windows PowerShell) and `./manage.sh` (for Linux/macOS/Bash).
+
+This tool interacts with the database schema dynamically using GORM and automates your database operations across all 10 microservices.
+
+##### A. Command: migrate
+Apply all pending SQL migrations across all microservices. It scans the `migrations/` folder inside each service, runs any new `.sql` migrations in alphabetical order, and tracks applied states in a composite `schema_migrations` table.
+- **Windows**:
+  ```powershell
+  .\manage.ps1 migrate
+  ```
+- **Linux/VPS**:
+  ```bash
+  ./manage.sh migrate
+  ```
+
+##### B. Command: makemigrations
+Generate a new sequential SQL migration template file for a specific microservice.
+- **Usage**:
+  ```bash
+  # ./manage.sh makemigrations <service_name> "<description>"
+  ```
+- **Example**:
+  ```bash
+  ./manage.sh makemigrations auth "add_followers_count"
+  ```
+  *This automatically generates a blank template file named `auth/migrations/0002_add_followers_count.sql` ready for you to write your raw SQL code.*
+
+##### C. Command: flushall (Truncate all tables)
+Clears all data from database tables (resetting primary key auto-increment ID sequences back to 1) without deleting the tables or changing the schema. It automatically uses transaction-safe cascading and prompts for confirmation.
+- **Windows**:
+  ```powershell
+  .\manage.ps1 flushall
+  ```
+- **Linux/VPS**:
+  ```bash
+  ./manage.sh flushall
+  ```
+
+##### D. Legacy: Accessing the PostgreSQL Shell (psql)
+To run manual SQL queries on your VPS database:
+```bash
+sudo -u postgres psql -d clasynq
+```
+
+================================================================================
+END OF PRODUCTION GUIDE
+================================================================================

@@ -600,6 +600,24 @@ func (u *userUsecase) UpdateMe(ctx context.Context, userID int64, updates map[st
 		user.SecurityAlerts = val
 	}
 
+	dobVal, exists := updates["dateOfBirth"]
+	if !exists {
+		dobVal, exists = updates["date_of_birth"]
+	}
+	if exists {
+		if valStr, ok := dobVal.(string); ok {
+			if valStr == "" {
+				user.DateOfBirth = nil
+			} else {
+				cleanDate := strings.Split(valStr, "T")[0]
+				t, err := time.Parse("2006-01-02", cleanDate)
+				if err == nil {
+					user.DateOfBirth = &t
+				}
+			}
+		}
+	}
+
 	if err := u.repo.UpdateUser(ctx, user); err != nil {
 		return nil, err
 	}
@@ -665,16 +683,49 @@ func (u *userUsecase) FollowUser(ctx context.Context, followerID, followedID int
 	}
 
 	// Trigger notifications
-	follower, _ := u.repo.GetUserByID(ctx, followerID)
-	msg := fmt.Sprintf("%s started following you.", follower.FullName)
-	notif := &domain.UserNotification{
-		RecipientID:      followedID,
-		SenderID:         &followerID,
-		NotificationType: "follow",
-		Message:          msg,
-		IsRead:           false,
+	var followerName string
+	followerUser, errU := u.repo.GetUserByID(ctx, followerID)
+	if errU == nil && followerUser != nil {
+		followerName = followerUser.FullName
+	} else {
+		teacher, errT := u.repo.GetTeacherByID(ctx, followerID)
+		if errT == nil && teacher != nil {
+			followerName = teacher.Name
+		} else {
+			admin, errA := u.repo.GetAdminByID(ctx, followerID)
+			if errA == nil && admin != nil {
+				followerName = "Admin"
+				if admin.Email != "" {
+					parts := strings.Split(admin.Email, "@")
+					followerName = strings.Title(strings.Replace(parts[0], ".", " ", -1))
+				}
+			}
+		}
 	}
-	_ = u.repo.CreateNotification(ctx, notif)
+
+	if followerName != "" {
+		followedRole := "student"
+		teacher, errT := u.repo.GetTeacherByID(ctx, followedID)
+		if errT == nil && teacher != nil {
+			followedRole = "teacher"
+		} else {
+			admin, errA := u.repo.GetAdminByID(ctx, followedID)
+			if errA == nil && admin != nil {
+				followedRole = "admin"
+			}
+		}
+
+		msg := fmt.Sprintf("%s started following you.", followerName)
+		notif := &domain.UserNotification{
+			RecipientID:      followedID,
+			RecipientRole:    followedRole,
+			SenderID:         &followerID,
+			NotificationType: "follow",
+			Message:          msg,
+			IsRead:           false,
+		}
+		_ = u.repo.CreateNotification(ctx, notif)
+	}
 
 	return nil
 }

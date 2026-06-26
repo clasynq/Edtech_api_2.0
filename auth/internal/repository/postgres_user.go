@@ -265,7 +265,43 @@ func (r *postgresUserRepository) GetFollowingList(ctx context.Context, userID in
 func (r *postgresUserRepository) GetNotifications(ctx context.Context, userID int64, role string) ([]domain.UserNotification, error) {
 	var notifications []domain.UserNotification
 	err := r.db.WithContext(ctx).Preload("Sender").Where("recipient_id = ? AND recipient_role = ?", userID, role).Order("created_at desc").Find(&notifications).Error
-	return notifications, err
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range notifications {
+		if notifications[i].SenderID != nil {
+			senderID := *notifications[i].SenderID
+			if notifications[i].Sender != nil {
+				notifications[i].SenderName = notifications[i].Sender.FullName
+				notifications[i].SenderAvatarUrl = notifications[i].Sender.AvatarURL
+			} else {
+				// Try teachers table
+				var teacher struct {
+					Name     string
+					PhotoURL string
+				}
+				if errT := r.db.WithContext(ctx).Table("teachers").Select("name, photo_url").Where("id = ?", senderID).First(&teacher).Error; errT == nil {
+					notifications[i].SenderName = teacher.Name
+					notifications[i].SenderAvatarUrl = teacher.PhotoURL
+				} else {
+					// Try admin table
+					var admin struct {
+						Email string
+					}
+					if errA := r.db.WithContext(ctx).Table("admin").Select("email").Where("id = ?", senderID).First(&admin).Error; errA == nil {
+						notifications[i].SenderName = "Admin"
+						if admin.Email != "" {
+							parts := strings.Split(admin.Email, "@")
+							notifications[i].SenderName = strings.Title(strings.Replace(parts[0], ".", " ", -1))
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return notifications, nil
 }
 
 func (r *postgresUserRepository) MarkNotificationsAsRead(ctx context.Context, userID int64, role string) error {

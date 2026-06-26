@@ -7,7 +7,7 @@ import (
 
 type User struct {
 	ID            int64  `gorm:"primaryKey;column:id" json:"id"`
-	FullName      string `gorm:"column:full_name" json:"fullName"`
+	FullName      string `gorm:"column:full_name" json:"name"`
 	Username      string `gorm:"column:username" json:"username"`
 	Email         string `gorm:"column:email" json:"email"`
 	AvatarURL     string `gorm:"column:avatar_url" json:"avatarUrl"`
@@ -121,6 +121,22 @@ func (SavedPost) TableName() string {
 	return "saved_posts"
 }
 
+type UserNotification struct {
+	ID               int64     `gorm:"primaryKey;column:id" json:"id"`
+	RecipientID      int64     `gorm:"column:recipient_id;not null;index" json:"recipientId"`
+	RecipientRole    string    `gorm:"column:recipient_role;type:varchar(50);default:'student'" json:"recipientRole"`
+	SenderID         *int64    `gorm:"column:sender_id;index" json:"senderId"`
+	Sender           User      `gorm:"foreignKey:SenderID;constraint:OnDelete:SET NULL" json:"sender"`
+	NotificationType string    `gorm:"column:notification_type;type:varchar(50);default:'system'" json:"notificationType"`
+	Message          string    `gorm:"column:message;type:text;not null" json:"message"`
+	IsRead           bool      `gorm:"column:is_read;type:boolean;default:false" json:"isRead"`
+	CreatedAt        time.Time `gorm:"column:created_at;type:timestamp with time zone;autoCreateTime" json:"createdAt"`
+}
+
+func (UserNotification) TableName() string {
+	return "user_notifications"
+}
+
 type ActivityLog struct {
 	ID           int64     `gorm:"primaryKey;column:id" json:"id"`
 	UserID       int64     `gorm:"column:user_id;not null;index" json:"userId"`
@@ -166,7 +182,13 @@ type BlogRepository interface {
 	// Counters and logs
 	IncrementPostCounters(ctx context.Context, postID int64, updates map[string]interface{}, scoreDiff float64) error
 	CreateActivityLog(ctx context.Context, log *ActivityLog) error
+	GetActivityLogs(ctx context.Context, userID int64, limit int) ([]ActivityLog, error)
 	RecordView(ctx context.Context, view *PostView) error
+	GetLatestPostView(ctx context.Context, postID int64, viewerIdentifier string) (*PostView, error)
+	UpdatePostView(ctx context.Context, view *PostView) error
+	ToggleFollowUser(ctx context.Context, followerID, followedID int64) (bool, error)
+	CreateNotification(ctx context.Context, notif *UserNotification) error
+	GetUserRole(ctx context.Context, userID int64) (string, error)
 
 	// Admin Queries
 	GetAdminPosts(ctx context.Context, query string, userSearch string, limit int) ([]BlogPost, error)
@@ -184,7 +206,12 @@ type BlogUsecase interface {
 	ToggleRepost(ctx context.Context, userID, postID int64) (map[string]interface{}, error)
 	AddComment(ctx context.Context, userID, postID int64, content string, parentID *int64) (map[string]interface{}, error)
 	DeleteComment(ctx context.Context, userID, commentID int64) error
+	GetCommentsForPost(ctx context.Context, postID int64) ([]BlogComment, error)
 	GetPostIDBySlug(ctx context.Context, slug string) (int64, error)
+	GetUserActivities(ctx context.Context, userID int64, limit int) (map[string]interface{}, error)
+	TrackPostView(ctx context.Context, postID int64, viewerIdentifier string, userID int64) (int, error)
+	TrackPostEngagement(ctx context.Context, postID int64, readTimeSeconds int, viewerIdentifier string, userID int64) (float64, error)
+	ToggleFollowUser(ctx context.Context, followerID, followedID int64) (bool, error)
 
 	// Admin Operations
 	GetAdminPosts(ctx context.Context, query string, userSearch string, limit int) (map[string]interface{}, error)

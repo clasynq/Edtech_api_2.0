@@ -17,6 +17,7 @@ func main() {
 	// 1. Load config (try parent directories first as it is in the tests folder)
 	_ = godotenv.Load("../.env")
 	_ = godotenv.Load("../../.env")
+	_ = godotenv.Load("../../../.env")
 	_ = godotenv.Load(".env")
 
 	cfg := config.LoadConfig()

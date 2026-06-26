@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"sort"
 	"strings"
@@ -66,14 +67,6 @@ func (u *blogUsecase) GetFeed(ctx context.Context, userID int64, category string
 		return nil, err
 	}
 
-	if len(candidates) == 0 {
-		return map[string]interface{}{
-			"posts":    []interface{}{},
-			"next":     nil,
-			"hasNext":  false,
-		}, nil
-	}
-
 	// If user is authenticated, load personalization factors
 	var followedIDs []int64
 	var mutualWeights map[int64]int
@@ -93,6 +86,25 @@ func (u *blogUsecase) GetFeed(ctx context.Context, userID int64, category string
 		followedMap[id] = true
 	}
 
+	// Filter candidates if following tab is selected and user is authenticated
+	if tab == "following" && userID > 0 {
+		filtered := make([]domain.BlogPost, 0)
+		for _, post := range candidates {
+			if followedMap[post.AuthorID] {
+				filtered = append(filtered, post)
+			}
+		}
+		candidates = filtered
+	}
+
+	if len(candidates) == 0 {
+		return map[string]interface{}{
+			"posts":    []interface{}{},
+			"next":     nil,
+			"hasNext":  false,
+		}, nil
+	}
+
 	// Structure candidates with metadata and compute personalization score
 	type scoredPost struct {
 		Post  domain.BlogPost
@@ -110,27 +122,38 @@ func (u *blogUsecase) GetFeed(ctx context.Context, userID int64, category string
 		}
 
 		// Personalization Scoring Algorithm:
-		// Base score is engagement score
-		score := post.EngagementScore
+		var score float64
+		if tab == "trending" {
+			velocityScore := (float64(post.LikesCount) * 5.0) +
+				(float64(post.CommentsCount) * 10.0) +
+				(float64(post.RepostsCount) * 8.0) +
+				(float64(post.ViewsCount) * 0.5)
 
-		// Boost if author is followed
-		if followedMap[post.AuthorID] {
-			score += 100.0
-		}
+			ageHours := time.Since(post.CreatedAt).Hours()
+			decay := 1.0 / math.Pow(1.0+0.1*ageHours, 2.0)
+			score = (velocityScore + 1.0) * decay
+		} else {
+			score = post.EngagementScore
 
-		// Boost for mutual connections
-		if mutualWeights != nil {
-			if count, ok := mutualWeights[post.AuthorID]; ok {
-				score += float64(count) * 15.0
+			// Boost if author is followed
+			if followedMap[post.AuthorID] {
+				score += 100.0
 			}
-		}
 
-		// Boost for skill matches (tags matching interests)
-		if len(userInterestSkills) > 0 && post.Tags != "" {
-			tagsLower := strings.ToLower(post.Tags)
-			for _, skill := range userInterestSkills {
-				if strings.Contains(tagsLower, skill) {
-					score += 10.0
+			// Boost for mutual connections
+			if mutualWeights != nil {
+				if count, ok := mutualWeights[post.AuthorID]; ok {
+					score += float64(count) * 15.0
+				}
+			}
+
+			// Boost for skill matches (tags matching interests)
+			if len(userInterestSkills) > 0 && post.Tags != "" {
+				tagsLower := strings.ToLower(post.Tags)
+				for _, skill := range userInterestSkills {
+					if strings.Contains(tagsLower, skill) {
+						score += 10.0
+					}
 				}
 			}
 		}
@@ -494,13 +517,6 @@ func (u *blogUsecase) AddComment(ctx context.Context, userID, postID int64, cont
 			createdComment = rc
 			break
 		}
-		// If nested, check replies
-		for _, reply := range rc.Replies {
-			if reply.ID == comment.ID {
-				createdComment = reply
-				break
-			}
-		}
 	}
 
 	// Log activity
@@ -516,6 +532,18 @@ func (u *blogUsecase) DeleteComment(ctx context.Context, userID, commentID int64
 	// GORM deletion will enforce authorID ownership matching
 	return u.repo.DeleteComment(ctx, commentID, userID)
 }
+
+func (u *blogUsecase) GetCommentsForPost(ctx context.Context, postID int64) ([]domain.BlogComment, error) {
+	comments, err := u.repo.GetCommentsForPost(ctx, postID)
+	if err != nil {
+		return []domain.BlogComment{}, err
+	}
+	if comments == nil {
+		comments = []domain.BlogComment{}
+	}
+	return comments, nil
+}
+
 
 func (u *blogUsecase) GetPostIDBySlug(ctx context.Context, slug string) (int64, error) {
 	post, err := u.repo.GetPostBySlug(ctx, slug)
@@ -629,4 +657,157 @@ func (u *blogUsecase) DeletePostAsAdmin(ctx context.Context, id int64) error {
 	}
 
 	return u.repo.DeletePost(ctx, id)
+}
+
+func (u *blogUsecase) GetUserActivities(ctx context.Context, userID int64, limit int) (map[string]interface{}, error) {
+	logs, err := u.repo.GetActivityLogs(ctx, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	activities := make([]map[string]interface{}, len(logs))
+	for i, log := range logs {
+		targetLink := ""
+		if log.TargetLink != nil {
+			targetLink = *log.TargetLink
+		}
+		details := ""
+		if log.Details != nil {
+			details = *log.Details
+		}
+
+		activities[i] = map[string]interface{}{
+			"id":          fmt.Sprintf("log_%d", log.ID),
+			"type":        log.ActivityType,
+			"description": log.Description,
+			"timestamp":   log.Timestamp.Format(time.RFC3339),
+			"targetLink":  targetLink,
+			"details":     details,
+		}
+	}
+
+	return map[string]interface{}{
+		"activities": activities,
+	}, nil
+}
+
+func (u *blogUsecase) TrackPostView(ctx context.Context, postID int64, viewerIdentifier string, userID int64) (int, error) {
+	post, err := u.repo.GetPostByID(ctx, postID)
+	if err != nil {
+		return 0, err
+	}
+	if post == nil {
+		return 0, errors.New("Article not found.")
+	}
+
+	cooldownTime := time.Now().Add(-10 * time.Minute)
+	latestView, err := u.repo.GetLatestPostView(ctx, postID, viewerIdentifier)
+	if err != nil {
+		return 0, err
+	}
+
+	isCooldown := latestView != nil && latestView.ViewedAt.After(cooldownTime)
+
+	if !isCooldown {
+		// Increment views_count and add 0.1 to engagement score
+		fields := map[string]interface{}{"views_count": 1}
+		_ = u.repo.IncrementPostCounters(ctx, postID, fields, 0.1)
+
+		newView := &domain.PostView{
+			PostID:           postID,
+			ViewerIdentifier: viewerIdentifier,
+			ReadTimeSeconds:  0,
+			ViewedAt:         time.Now(),
+		}
+		if userID > 0 {
+			newView.UserID = &userID
+		}
+		_ = u.repo.RecordView(ctx, newView)
+		post.ViewsCount++
+
+		// Milestone Notification for every 100 views
+		if post.ViewsCount > 0 && post.ViewsCount % 100 == 0 {
+			authorRole, errR := u.repo.GetUserRole(ctx, post.AuthorID)
+			if errR == nil {
+				msg := fmt.Sprintf("Your article \"%s\" has reached %d views!", post.Title, post.ViewsCount)
+				notif := &domain.UserNotification{
+					RecipientID:      post.AuthorID,
+					RecipientRole:    authorRole,
+					NotificationType: "milestone",
+					Message:          msg,
+					IsRead:           false,
+				}
+				_ = u.repo.CreateNotification(ctx, notif)
+			}
+		}
+	} else {
+		latestView.ViewedAt = time.Now()
+		if userID > 0 && latestView.UserID == nil {
+			latestView.UserID = &userID
+		}
+		_ = u.repo.UpdatePostView(ctx, latestView)
+	}
+
+	return post.ViewsCount, nil
+}
+
+func (u *blogUsecase) TrackPostEngagement(ctx context.Context, postID int64, readTimeSeconds int, viewerIdentifier string, userID int64) (float64, error) {
+	post, err := u.repo.GetPostByID(ctx, postID)
+	if err != nil {
+		return 0, err
+	}
+	if post == nil {
+		return 0, errors.New("Article not found.")
+	}
+
+	latestView, err := u.repo.GetLatestPostView(ctx, postID, viewerIdentifier)
+	if err != nil {
+		return 0, err
+	}
+
+	if latestView != nil {
+		latestView.ReadTimeSeconds += readTimeSeconds
+		if userID > 0 && latestView.UserID == nil {
+			latestView.UserID = &userID
+		}
+		_ = u.repo.UpdatePostView(ctx, latestView)
+	} else {
+		newView := &domain.PostView{
+			PostID:           postID,
+			ViewerIdentifier: viewerIdentifier,
+			ReadTimeSeconds:  readTimeSeconds,
+			ViewedAt:         time.Now(),
+		}
+		if userID > 0 {
+			newView.UserID = &userID
+		}
+		_ = u.repo.RecordView(ctx, newView)
+	}
+
+	if readTimeSeconds > 0 {
+		// Increment engagement score by readTimeSeconds * 0.1
+		scoreDiff := float64(readTimeSeconds) * 0.1
+		_ = u.repo.IncrementPostCounters(ctx, postID, nil, scoreDiff)
+		post.EngagementScore += scoreDiff
+	}
+
+	return post.EngagementScore, nil
+}
+
+func (u *blogUsecase) ToggleFollowUser(ctx context.Context, followerID, followedID int64) (bool, error) {
+	if followerID == followedID {
+		return false, errors.New("You cannot follow yourself.")
+	}
+
+	isFollowing, err := u.repo.ToggleFollowUser(ctx, followerID, followedID)
+	if err != nil {
+		return false, err
+	}
+
+	if isFollowing {
+		msg := "Started following user."
+		u.logActivity(ctx, followerID, "follow", msg, fmt.Sprintf("/user/%d", followedID), "")
+	}
+
+	return isFollowing, nil
 }

@@ -46,12 +46,19 @@ func (h *HttpHandler) RegisterRoutes(r *gin.Engine, authMiddleware gin.HandlerFu
 		me.Use(authMiddleware)
 		{
 			me.GET("", h.GetMe)
+			me.GET("/", h.GetMe)
 			me.PUT("", h.UpdateMe)
+			me.PUT("/", h.UpdateMe)
 			me.PUT("/change-password", h.ChangePassword)
+			me.PUT("/change-password/", h.ChangePassword)
 			me.POST("/follow/:id", h.FollowUser)
+			me.POST("/follow/:id/", h.FollowUser)
 			me.DELETE("/unfollow/:id", h.UnfollowUser)
+			me.DELETE("/unfollow/:id/", h.UnfollowUser)
 			me.GET("/notifications", h.GetNotifications)
+			me.GET("/notifications/", h.GetNotifications)
 			me.POST("/notifications/read", h.MarkNotificationsAsRead)
+			me.POST("/notifications/read/", h.MarkNotificationsAsRead)
 		}
 	}
 }
@@ -420,7 +427,17 @@ func (h *HttpHandler) GetNotifications(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, res)
+	unreadCount := 0
+	for _, n := range res {
+		if !n.IsRead {
+			unreadCount++
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"notifications": res,
+		"unreadCount":   unreadCount,
+	})
 }
 
 func (h *HttpHandler) MarkNotificationsAsRead(c *gin.Context) {
