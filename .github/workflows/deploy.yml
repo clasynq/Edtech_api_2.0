@@ -15,7 +15,7 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: clasynq
           key: ${{ secrets.VPS_SSH_KEY }}
-          port: 22
+          port: ${{ secrets.VPS_SSH_PORT }}
           script: |
             cd /home/clasynq/clasynq
             
