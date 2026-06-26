@@ -643,35 +643,55 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Deploy and Build via SSH
-        uses: appleboy/ssh-action@master
+        uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VPS_HOST }}
           username: clasynq
           key: ${{ secrets.VPS_SSH_KEY }}
-          port: 22022
+          port: ${{ secrets.VPS_SSH_PORT }}
           script: |
             cd /home/clasynq/clasynq
+            
+            # 1. Fetch remote changes to compare
+            git fetch origin main
+            
+            # 2. Get list of files that will change
+            DIFF=$(git diff --name-only HEAD origin/main)
+            
+            # 3. Pull latest code
             git pull origin main
             
-            # Run clean builds for all Go services
-            go build -o /home/clasynq/services/bin/admin-service ./admin/cmd/server/main.go
-            go build -o /home/clasynq/services/bin/auth-service ./auth/cmd/server/main.go
-            go build -o /home/clasynq/services/bin/blog-service ./blog/cmd/server/main.go
-            go build -o /home/clasynq/services/bin/cbt_exam-service ./cbt_exam/cmd/server/main.go
-            go build -o /home/clasynq/services/bin/courses-service ./courses/cmd/server/main.go
-            go build -o /home/clasynq/services/bin/dashboard_profile-service ./dashboard_profile/cmd/server/main.go
-            go build -o /home/clasynq/services/bin/enrollments-service ./enrollments/cmd/server/main.go
-            go build -o /home/clasynq/services/bin/notes-service ./notes/cmd/server/main.go
-            go build -o /home/clasynq/services/bin/teacher-service ./teacher/cmd/server/main.go
-            go build -o /home/clasynq/services/bin/test_series-service ./test_series/cmd/server/main.go
+            # 4. Check if we need to rebuild everything
+            REBUILD_ALL=false
+            if echo "$DIFF" | grep -qE "^(go\.mod|go\.sum|go\.work|go\.work\.sum|\.env)"; then
+                echo "Root workspace files changed. Rebuilding all services."
+                REBUILD_ALL=true
+            fi
             
-            # Restart all 10 Go daemons
-            sudo systemctl restart csq-admin csq-auth csq-blog csq-cbt-exam csq-courses csq-dashboard-profile csq-enrollments csq-notes csq-teacher csq-test-series
+            # 5. Build and restart services conditionally
+            services=("admin" "auth" "blog" "cbt_exam" "courses" "dashboard_profile" "enrollments" "notes" "teacher" "test_series")
+            
+            for svc in "${services[@]}"; do
+                if [ "$REBUILD_ALL" = true ] || echo "$DIFF" | grep -q "^$svc/"; then
+                    echo "=================================================="
+                    echo "Building and restarting service: $svc"
+                    echo "=================================================="
+                    
+                    # Compile binary
+                    bin_name="$svc-service"
+                    go build -o "/home/clasynq/services/bin/$bin_name" "./$svc/cmd/server/main.go"
+                    
+                    # Convert folder name underscore to dash for systemd service name
+                    svc_dashed=$(echo "$svc" | tr '_' '-')
+                    sudo systemctl restart "csq-$svc_dashed"
+                fi
+            done
 ```
 
 3. Go to **GitHub -> Repository -> Settings -> Secrets and Variables -> Actions -> New repository secret**:
    - `VPS_HOST`: Add your VPS IP Address.
-   - `VPS_SSH_KEY`: Add the raw content of your private SSH key (`cat ~/.ssh/id_ed25519` from VPS).
+   - `VPS_SSH_KEY`: Add the raw content of your private SSH key (`cat ~/.ssh/id_ed25519_clasynq_go` from VPS).
+   - `VPS_SSH_PORT`: Add your custom SSH port (e.g. `22022` or `22`).
 
 STEP 19 — AUTOMATED DAILY POSTGRESQL BACKUPS
 ================================================================================
