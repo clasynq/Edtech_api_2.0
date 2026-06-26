@@ -145,7 +145,7 @@ func (r *postgresCourseRepository) GetCourseByIDOrSlug(ctx context.Context, idOr
 func (r *postgresCourseRepository) CreateCourse(ctx context.Context, course *domain.Course, teacherIDs []int64, subjectIDs []int64) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Create course (omitting slices to handle join tables manually and avoid duplication)
-		if err := tx.Omit("Teachers", "Subjects").Create(course).Error; err != nil {
+		if err := tx.Omit("Teacher", "Teachers", "Subjects").Create(course).Error; err != nil {
 			return err
 		}
 
@@ -155,8 +155,10 @@ func (r *postgresCourseRepository) CreateCourse(ctx context.Context, course *dom
 			if err := tx.Where("id IN ?", teacherIDs).Find(&teachers).Error; err != nil {
 				return err
 			}
-			if err := tx.Model(course).Association("Teachers").Replace(&teachers); err != nil {
-				return err
+			for _, t := range teachers {
+				if err := tx.Exec("INSERT INTO courses_teachers (course_id, teacher_id) VALUES (?, ?) ON CONFLICT DO NOTHING", course.ID, t.ID).Error; err != nil {
+					return err
+				}
 			}
 		}
 
@@ -166,8 +168,10 @@ func (r *postgresCourseRepository) CreateCourse(ctx context.Context, course *dom
 			if err := tx.Where("id IN ?", subjectIDs).Find(&subjects).Error; err != nil {
 				return err
 			}
-			if err := tx.Model(course).Association("Subjects").Replace(&subjects); err != nil {
-				return err
+			for _, s := range subjects {
+				if err := tx.Exec("INSERT INTO courses_subjects (course_id, subject_id) VALUES (?, ?) ON CONFLICT DO NOTHING", course.ID, s.ID).Error; err != nil {
+					return err
+				}
 			}
 		}
 
@@ -178,33 +182,43 @@ func (r *postgresCourseRepository) CreateCourse(ctx context.Context, course *dom
 func (r *postgresCourseRepository) UpdateCourse(ctx context.Context, course *domain.Course, teacherIDs *[]int64, subjectIDs *[]int64) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Update course standard fields
-		if err := tx.Omit("Teachers", "Subjects").Save(course).Error; err != nil {
+		if err := tx.Omit("Teacher", "Teachers", "Subjects").Save(course).Error; err != nil {
 			return err
 		}
 
 		// Update teachers association if provided
 		if teacherIDs != nil {
-			var teachers []domain.Teacher
+			if err := tx.Exec("DELETE FROM courses_teachers WHERE course_id = ?", course.ID).Error; err != nil {
+				return err
+			}
 			if len(*teacherIDs) > 0 {
+				var teachers []domain.Teacher
 				if err := tx.Where("id IN ?", *teacherIDs).Find(&teachers).Error; err != nil {
 					return err
 				}
-			}
-			if err := tx.Model(course).Association("Teachers").Replace(&teachers); err != nil {
-				return err
+				for _, t := range teachers {
+					if err := tx.Exec("INSERT INTO courses_teachers (course_id, teacher_id) VALUES (?, ?) ON CONFLICT DO NOTHING", course.ID, t.ID).Error; err != nil {
+						return err
+					}
+				}
 			}
 		}
 
 		// Update subjects association if provided
 		if subjectIDs != nil {
-			var subjects []domain.Subject
+			if err := tx.Exec("DELETE FROM courses_subjects WHERE course_id = ?", course.ID).Error; err != nil {
+				return err
+			}
 			if len(*subjectIDs) > 0 {
+				var subjects []domain.Subject
 				if err := tx.Where("id IN ?", *subjectIDs).Find(&subjects).Error; err != nil {
 					return err
 				}
-			}
-			if err := tx.Model(course).Association("Subjects").Replace(&subjects); err != nil {
-				return err
+				for _, s := range subjects {
+					if err := tx.Exec("INSERT INTO courses_subjects (course_id, subject_id) VALUES (?, ?) ON CONFLICT DO NOTHING", course.ID, s.ID).Error; err != nil {
+						return err
+					}
+				}
 			}
 		}
 
@@ -214,7 +228,7 @@ func (r *postgresCourseRepository) UpdateCourse(ctx context.Context, course *dom
 
 func (r *postgresCourseRepository) DeleteCourse(ctx context.Context, id int64) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Clear associations first
+		// Clear join table associations first
 		var course domain.Course
 		course.ID = id
 		if err := tx.Model(&course).Association("Teachers").Clear(); err != nil {
@@ -224,7 +238,28 @@ func (r *postgresCourseRepository) DeleteCourse(ctx context.Context, id int64) e
 			return err
 		}
 
-		// Delete the course
+		// 1. Delete associated class_schedules (since course_id is NOT NULL)
+		if err := tx.Exec("DELETE FROM class_schedules WHERE course_id = ?", id).Error; err != nil {
+			return err
+		}
+
+		// 2. Delete associated enrollments (since course_id is NOT NULL)
+		if err := tx.Exec("DELETE FROM enrollments WHERE course_id = ?", id).Error; err != nil {
+			return err
+		}
+
+		// 3. Nullify nullable course_id references to prevent foreign key constraint violations
+		if err := tx.Exec("UPDATE notes SET course_id = NULL WHERE course_id = ?", id).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec("UPDATE test_series SET course_id = NULL WHERE course_id = ?", id).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec("UPDATE payment_orders SET course_id = NULL WHERE course_id = ?", id).Error; err != nil {
+			return err
+		}
+
+		// Delete the course itself
 		if err := tx.Delete(&course).Error; err != nil {
 			return err
 		}

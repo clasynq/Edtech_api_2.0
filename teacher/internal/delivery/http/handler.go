@@ -38,6 +38,7 @@ func (h *HttpHandler) RegisterRoutes(r *gin.Engine, authMiddleware gin.HandlerFu
 		teacher.Use(authMiddleware, RequireTeacher())
 		{
 			teacher.GET("/overview", h.GetOverview)
+			teacher.GET("/categories", h.GetCategories)
 			teacher.POST("/assign-student", h.AssignStudent)
 			teacher.GET("/batches", h.GetBatches)
 			teacher.GET("/chapters", h.GetChapters)
@@ -56,6 +57,16 @@ func (h *HttpHandler) GetOverview(c *gin.Context) {
 	category := c.Query("category")
 	
 	res, err := h.usecase.GetOverview(c.Request.Context(), teacherID, category)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, res)
+}
+
+func (h *HttpHandler) GetCategories(c *gin.Context) {
+	teacherID := c.MustGet("userID").(int64)
+	res, err := h.usecase.GetCategories(c.Request.Context(), teacherID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
 		return
@@ -274,6 +285,17 @@ func (h *HttpHandler) UploadNote(c *gin.Context) {
 
 	batchID := c.PostForm("batchId")
 	title := c.PostForm("title")
+	recordedClassURL := c.PostForm("recordedClassUrl")
+	if recordedClassURL == "" {
+		recordedClassURL = c.PostForm("recorded_class_url")
+	}
+
+	subject := c.PostForm("subject")
+	topic := c.PostForm("topic")
+	prerequisiteURL := c.PostForm("prerequisiteUrl")
+	if prerequisiteURL == "" {
+		prerequisiteURL = c.PostForm("prerequisite_url")
+	}
 
 	if batchID == "" || title == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "batchId and title are required"})
@@ -281,18 +303,21 @@ func (h *HttpHandler) UploadNote(c *gin.Context) {
 	}
 
 	_, _, err := c.Request.FormFile("file")
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"message": "file is required"})
+	if err != nil && recordedClassURL == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Either file or class recording link is required"})
 		return
 	}
 
-	fileURL, err := h.saveFileLocally(c, "file", "notes")
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"message": "file upload failed: " + err.Error()})
-		return
+	fileURL := ""
+	if err == nil {
+		fileURL, err = h.saveFileLocally(c, "file", "notes")
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "file upload failed: " + err.Error()})
+			return
+		}
 	}
 
-	res, err := h.usecase.UploadNote(c.Request.Context(), teacherID, batchID, title, fileURL)
+	res, err := h.usecase.UploadNote(c.Request.Context(), teacherID, batchID, title, fileURL, recordedClassURL, subject, topic, prerequisiteURL)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
 		return

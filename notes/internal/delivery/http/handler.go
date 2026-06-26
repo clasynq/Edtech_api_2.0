@@ -121,63 +121,125 @@ func (h *httpHandler) GetNoteDetails(c *gin.Context) {
 func (h *httpHandler) CreateNote(c *gin.Context) {
 	title := c.PostForm("title")
 	description := c.PostForm("description")
+	
 	noteType := c.PostForm("noteType")
-	isFree, _ := strconv.ParseBool(c.PostForm("isFree"))
+	if noteType == "" {
+		noteType = c.PostForm("note_type")
+	}
+	
+	// Enforce: admins are not allowed to upload class notes
+	roleVal, exists := c.Get("role")
+	if exists {
+		role := roleVal.(string)
+		if role == "admin" && noteType == "class" {
+			c.JSON(http.StatusForbidden, gin.H{"detail": "Admins are not allowed to upload class-related notes. Class notes can only be uploaded by teachers."})
+			return
+		}
+	}
+	
+	isFreeStr := c.PostForm("isFree")
+	if isFreeStr == "" {
+		isFreeStr = c.PostForm("is_free")
+	}
+	isFree, _ := strconv.ParseBool(isFreeStr)
+	
 	price, _ := strconv.ParseFloat(c.PostForm("price"), 64)
+	
 	batchID := c.PostForm("batchId")
+	if batchID == "" {
+		batchID = c.PostForm("batch_id")
+	}
+	
 	category := c.PostForm("category")
 	slug := c.PostForm("slug")
-	hasSvgs, _ := strconv.ParseBool(c.PostForm("hasSvgs"))
-	pageCount, _ := strconv.Atoi(c.PostForm("pageCount"))
+	
+	hasSvgsStr := c.PostForm("hasSvgs")
+	if hasSvgsStr == "" {
+		hasSvgsStr = c.PostForm("has_svgs")
+	}
+	hasSvgs, _ := strconv.ParseBool(hasSvgsStr)
+	
+	pageCountStr := c.PostForm("pageCount")
+	if pageCountStr == "" {
+		pageCountStr = c.PostForm("page_count")
+	}
+	pageCount, _ := strconv.Atoi(pageCountStr)
 
 	var courseID *int64
-	if cIDStr := c.PostForm("courseId"); cIDStr != "" {
-		if cID, err := strconv.ParseInt(cIDStr, 10, 64); err == nil {
+	courseIDStr := c.PostForm("courseId")
+	if courseIDStr == "" {
+		courseIDStr = c.PostForm("course")
+	}
+	if courseIDStr != "" {
+		if cID, err := strconv.ParseInt(courseIDStr, 10, 64); err == nil {
 			courseID = &cID
 		}
 	}
 
+	recordedClassURL := c.PostForm("recordedClassUrl")
+	if recordedClassURL == "" {
+		recordedClassURL = c.PostForm("recorded_class_url")
+	}
+
+	subject := c.PostForm("subject")
+	topic := c.PostForm("topic")
+
+	prerequisiteURL := c.PostForm("prerequisiteUrl")
+	if prerequisiteURL == "" {
+		prerequisiteURL = c.PostForm("prerequisite_url")
+	}
+
 	file, err := c.FormFile("file")
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "PDF note file is required"})
+	if err != nil && recordedClassURL == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "Either PDF note file or class recording link is required"})
 		return
 	}
 
-	// 1. Create target directory
-	notesDir := filepath.Join(h.mediaRoot, "notes")
-	if err := os.MkdirAll(notesDir, 0755); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": fmt.Sprintf("failed to create notes directory: %v", err)})
-		return
-	}
+	fileURL := ""
+	var dest string
+	if err == nil && file != nil {
+		// 1. Create target directory
+		notesDir := filepath.Join(h.mediaRoot, "notes")
+		if err := os.MkdirAll(notesDir, 0755); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"detail": fmt.Sprintf("failed to create notes directory: %v", err)})
+			return
+		}
 
-	// 2. Save file
-	filename := fmt.Sprintf("%d_%s", time.Now().UnixNano(), file.Filename)
-	dest := filepath.Join(notesDir, filename)
-	if err := c.SaveUploadedFile(file, dest); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": fmt.Sprintf("failed to save file: %v", err)})
-		return
-	}
+		// 2. Save file
+		filename := fmt.Sprintf("%d_%s", time.Now().UnixNano(), file.Filename)
+		dest = filepath.Join(notesDir, filename)
+		if err := c.SaveUploadedFile(file, dest); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"detail": fmt.Sprintf("failed to save file: %v", err)})
+			return
+		}
 
-	fileURL := fmt.Sprintf("%s/media/notes/%s", h.baseURL, filename)
+		fileURL = fmt.Sprintf("%s/media/notes/%s", h.baseURL, filename)
+	}
 
 	note := &domain.Note{
-		Title:       title,
-		Description: description,
-		NoteType:    noteType,
-		IsFree:      isFree,
-		Price:       price,
-		BatchID:     batchID,
-		FileURL:     fileURL,
-		CourseID:    courseID,
-		HasSvgs:     hasSvgs,
-		PageCount:   pageCount,
-		Category:    category,
-		Slug:        slug,
+		Title:            title,
+		Description:      description,
+		NoteType:         noteType,
+		IsFree:           isFree,
+		Price:            price,
+		BatchID:          batchID,
+		FileURL:          fileURL,
+		CourseID:         courseID,
+		HasSvgs:          hasSvgs,
+		PageCount:        pageCount,
+		Category:         category,
+		Slug:             slug,
+		RecordedClassURL: recordedClassURL,
+		Subject:          subject,
+		Topic:            topic,
+		PrerequisiteURL:  prerequisiteURL,
 	}
 
 	if err := h.uc.CreateNote(c.Request.Context(), note); err != nil {
 		// Clean up saved file if DB insert fails
-		_ = os.Remove(dest)
+		if dest != "" {
+			_ = os.Remove(dest)
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
 		return
 	}
@@ -197,47 +259,107 @@ func (h *httpHandler) UpdateNote(c *gin.Context) {
 	if val := c.PostForm("description"); val != "" {
 		updates["description"] = val
 	}
-	if val := c.PostForm("noteType"); val != "" {
-		updates["noteType"] = val
+	
+	noteType := c.PostForm("noteType")
+	if noteType == "" {
+		noteType = c.PostForm("note_type")
 	}
-	if val := c.PostForm("isFree"); val != "" {
-		isFree, err := strconv.ParseBool(val)
+	if noteType != "" {
+		roleVal, exists := c.Get("role")
+		if exists {
+			role := roleVal.(string)
+			if role == "admin" && noteType == "class" {
+				c.JSON(http.StatusForbidden, gin.H{"detail": "Admins are not allowed to set note type to class-related. Class notes can only be managed by teachers."})
+				return
+			}
+		}
+		updates["noteType"] = noteType
+	}
+	
+	isFreeStr := c.PostForm("isFree")
+	if isFreeStr == "" {
+		isFreeStr = c.PostForm("is_free")
+	}
+	if isFreeStr != "" {
+		isFree, err := strconv.ParseBool(isFreeStr)
 		if err == nil {
 			updates["isFree"] = isFree
 		}
 	}
+	
 	if val := c.PostForm("price"); val != "" {
 		price, err := strconv.ParseFloat(val, 64)
 		if err == nil {
 			updates["price"] = price
 		}
 	}
-	if val := c.PostForm("batchId"); val != "" {
-		updates["batchId"] = val
+	
+	batchID := c.PostForm("batchId")
+	if batchID == "" {
+		batchID = c.PostForm("batch_id")
 	}
+	if batchID != "" {
+		updates["batchId"] = batchID
+	}
+	
 	if val := c.PostForm("category"); val != "" {
 		updates["category"] = val
 	}
 	if val := c.PostForm("slug"); val != "" {
 		updates["slug"] = val
 	}
-	if val := c.PostForm("hasSvgs"); val != "" {
-		hasSvgs, err := strconv.ParseBool(val)
+	
+	recordedClassURL := c.PostForm("recordedClassUrl")
+	if recordedClassURL == "" {
+		recordedClassURL = c.PostForm("recorded_class_url")
+	}
+	if recordedClassURL != "" {
+		updates["recordedClassUrl"] = recordedClassURL
+	}
+
+	if val := c.PostForm("subject"); val != "" {
+		updates["subject"] = val
+	}
+	if val := c.PostForm("topic"); val != "" {
+		updates["topic"] = val
+	}
+	if val := c.PostForm("prerequisiteUrl"); val != "" {
+		updates["prerequisiteUrl"] = val
+	} else if val := c.PostForm("prerequisite_url"); val != "" {
+		updates["prerequisiteUrl"] = val
+	}
+	
+	hasSvgsStr := c.PostForm("hasSvgs")
+	if hasSvgsStr == "" {
+		hasSvgsStr = c.PostForm("has_svgs")
+	}
+	if hasSvgsStr != "" {
+		hasSvgs, err := strconv.ParseBool(hasSvgsStr)
 		if err == nil {
 			updates["hasSvgs"] = hasSvgs
 		}
 	}
-	if val := c.PostForm("pageCount"); val != "" {
-		pageCount, err := strconv.Atoi(val)
+	
+	pageCountStr := c.PostForm("pageCount")
+	if pageCountStr == "" {
+		pageCountStr = c.PostForm("page_count")
+	}
+	if pageCountStr != "" {
+		pageCount, err := strconv.Atoi(pageCountStr)
 		if err == nil {
 			updates["pageCount"] = float64(pageCount)
 		}
 	}
-	if val := c.PostForm("courseId"); val != "" {
-		if val == "null" || val == "none" {
+	
+	courseIDStr := c.PostForm("courseId")
+	if courseIDStr == "" {
+		courseIDStr = c.PostForm("course")
+	}
+	if courseIDStr != "" {
+		if courseIDStr == "null" || courseIDStr == "none" {
 			updates["courseId"] = nil
 		} else {
-			courseID, err := strconv.ParseInt(val, 10, 64)
+			courseID, err := strconv.ParseInt(courseIDStr, 10, 64)
 			if err == nil {
 				updates["courseId"] = float64(courseID)
 			}

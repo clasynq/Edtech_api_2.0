@@ -160,6 +160,9 @@ type Note struct {
 	Category string  `gorm:"column:category"`
 	NoteType string  `gorm:"column:note_type"` // e.g. public, batch
 	IsFree   bool    `gorm:"column:is_free"`
+	Subject  string  `gorm:"column:subject;type:varchar(255)"`
+	Topic    string  `gorm:"column:topic;type:varchar(255)"`
+	PrerequisiteURL string `gorm:"column:prerequisite_url;type:text"`
 }
 
 func (Note) TableName() string {
@@ -271,6 +274,7 @@ type AdminRepository interface {
 	
 	// Students
 	ListStudents(ctx context.Context, query, category string) ([]Student, error)
+	GetStudentEnrollmentInfo(ctx context.Context, studentIDs []int64) (map[int64][]string, map[int64][]string, error)
 
 	// Sales Analysis Queries
 	GetCoursesSales(ctx context.Context, category string, start, end time.Time) ([]CourseSales, error)

@@ -242,6 +242,8 @@ func (u *adminUsecase) UpdateTeacher(ctx context.Context, teacherID int64, updat
 		return nil, err
 	}
 
+	u.invalidateTeacherCache(ctx, teacher.ID)
+
 	_, _ = u.repo.RefreshDashboardStats(ctx)
 
 	// Trigger notifications for updates
@@ -447,6 +449,7 @@ func (u *adminUsecase) DeleteTeacher(ctx context.Context, teacherID int64, compl
 	}
 
 	_, _ = u.repo.RefreshDashboardStats(ctx)
+	u.invalidateTeacherCache(ctx, teacherID)
 	return nil
 }
 
@@ -455,16 +458,48 @@ func (u *adminUsecase) ListStudents(ctx context.Context, query, category string)
 	if err != nil {
 		return nil, err
 	}
+
+	if len(list) == 0 {
+		return []map[string]interface{}{}, nil
+	}
+
+	// Extract student IDs to fetch enrollments
+	studentIDs := make([]int64, len(list))
+	for i, s := range list {
+		studentIDs[i] = s.ID
+	}
+
+	// Fetch courses & batches info in a single batch query
+	coursesMap, batchesMap, err := u.repo.GetStudentEnrollmentInfo(ctx, studentIDs)
+	if err != nil {
+		// Log/fail-safe
+		coursesMap = make(map[int64][]string)
+		batchesMap = make(map[int64][]string)
+	}
+
 	res := make([]map[string]interface{}, len(list))
 	for i, s := range list {
+		courses := coursesMap[s.ID]
+		if courses == nil {
+			courses = []string{}
+		}
+		batches := batchesMap[s.ID]
+		if batches == nil {
+			batches = []string{}
+		}
+
 		res[i] = map[string]interface{}{
-			"id":            s.ID,
-			"email":         s.User.Email,
-			"username":      s.User.Username,
-			"fullName":      s.User.FullName,
-			"contactNumber": s.User.ContactNumber,
-			"avatarUrl":     s.User.AvatarURL,
-			"createdAt":     s.CreatedAt.Format(time.RFC3339),
+			"id":               s.ID,
+			"email":            s.User.Email,
+			"username":         s.User.Username,
+			"fullName":         s.User.FullName,
+			"name":             s.User.FullName,      // Frontend expects student.name
+			"contactNumber":    s.User.ContactNumber,
+			"phoneNumber":      s.User.ContactNumber, // Frontend expects student.phoneNumber
+			"avatarUrl":        s.User.AvatarURL,
+			"createdAt":        s.CreatedAt.Format(time.RFC3339),
+			"purchasedCourses": courses,
+			"purchasedBatches": batches,
 		}
 	}
 	return res, nil
@@ -811,4 +846,30 @@ func getStringField(m map[string]interface{}, key string) string {
 		return val
 	}
 	return ""
+}
+
+func (u *adminUsecase) invalidateTeacherCache(ctx context.Context, teacherID int64) {
+	if u.rdb == nil {
+		return
+	}
+	patterns := []string{
+		fmt.Sprintf("teacher_overview_%d*", teacherID),
+		fmt.Sprintf("teacher_batches_%d*", teacherID),
+	}
+	for _, pattern := range patterns {
+		var cursor uint64
+		for {
+			keys, nextCursor, err := u.rdb.Scan(ctx, cursor, pattern, 100).Result()
+			if err != nil {
+				break
+			}
+			if len(keys) > 0 {
+				u.rdb.Del(ctx, keys...)
+			}
+			cursor = nextCursor
+			if cursor == 0 {
+				break
+			}
+		}
+	}
 }

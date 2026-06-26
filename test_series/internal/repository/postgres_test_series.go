@@ -164,27 +164,65 @@ func (r *postgresTestSeriesRepository) UpdateTest(ctx context.Context, test *dom
 
 func (r *postgresTestSeriesRepository) DeleteTest(ctx context.Context, id int64) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var questions []domain.Question
-		if err := tx.Where("test_id = ?", id).Find(&questions).Error; err != nil {
+		// 1. Get all questions under this test
+		var questionIDs []int64
+		if err := tx.Table("questions").Where("test_id = ?", id).Pluck("id", &questionIDs).Error; err != nil {
 			return err
 		}
-		for _, q := range questions {
-			if err := tx.Where("question_id = ?", q.ID).Delete(&domain.QuestionOption{}).Error; err != nil {
+
+		// 2. Get all student attempts under this test
+		var attemptIDs []int64
+		if err := tx.Table("student_test_attempts").Where("test_id = ?", id).Pluck("id", &attemptIDs).Error; err != nil {
+			return err
+		}
+
+		// 3. Delete student answers (referenced by attempts and questions)
+		if len(attemptIDs) > 0 {
+			if err := tx.Exec("DELETE FROM student_answers WHERE attempt_id IN ?", attemptIDs).Error; err != nil {
+				return err
+			}
+			// 4. Delete test results (referenced by attempts)
+			if err := tx.Exec("DELETE FROM test_results WHERE attempt_id IN ?", attemptIDs).Error; err != nil {
+				return err
+			}
+			// 5. Delete student test attempts
+			if err := tx.Exec("DELETE FROM student_test_attempts WHERE id IN ?", attemptIDs).Error; err != nil {
 				return err
 			}
 		}
-		if err := tx.Where("test_id = ?", id).Delete(&domain.Question{}).Error; err != nil {
-			return err
+
+		// If there are questions, delete options, answers, and questions
+		if len(questionIDs) > 0 {
+			// Delete student answers for these questions just in case
+			if err := tx.Exec("DELETE FROM student_answers WHERE question_id IN ?", questionIDs).Error; err != nil {
+				return err
+			}
+			// 6. Delete question options
+			if err := tx.Exec("DELETE FROM question_options WHERE question_id IN ?", questionIDs).Error; err != nil {
+				return err
+			}
+			// 7. Delete questions
+			if err := tx.Exec("DELETE FROM questions WHERE id IN ?", questionIDs).Error; err != nil {
+				return err
+			}
 		}
+
+		// 8. Finally, delete the test itself
 		return tx.Delete(&domain.Test{}, id).Error
 	})
 }
 
 func (r *postgresTestSeriesRepository) DeleteQuestion(ctx context.Context, id int64) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Delete student answers referencing this question
+		if err := tx.Exec("DELETE FROM student_answers WHERE question_id = ?", id).Error; err != nil {
+			return err
+		}
+		// Delete question options referencing this question
 		if err := tx.Where("question_id = ?", id).Delete(&domain.QuestionOption{}).Error; err != nil {
 			return err
 		}
+		// Delete the question
 		return tx.Delete(&domain.Question{}, id).Error
 	})
 }
@@ -196,20 +234,72 @@ func (r *postgresTestSeriesRepository) UpdateTestSeries(ctx context.Context, id 
 
 func (r *postgresTestSeriesRepository) DeleteTestSeries(ctx context.Context, id int64) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var tests []domain.Test
-		if err := tx.Where("test_series_id = ?", id).Find(&tests).Error; err == nil {
-			for _, test := range tests {
-				var questions []domain.Question
-				if err := tx.Where("test_id = ?", test.ID).Find(&questions).Error; err == nil {
-					for _, q := range questions {
-						_ = tx.Where("question_id = ?", q.ID).Delete(&domain.QuestionOption{}).Error
-					}
+		// 1. Get all tests under this test series
+		var testIDs []int64
+		if err := tx.Table("tests").Where("test_series_id = ?", id).Pluck("id", &testIDs).Error; err != nil {
+			return err
+		}
+
+		if len(testIDs) > 0 {
+			// 2. Get all questions under these tests
+			var questionIDs []int64
+			if err := tx.Table("questions").Where("test_id IN ?", testIDs).Pluck("id", &questionIDs).Error; err != nil {
+				return err
+			}
+
+			// 3. Get all student attempts under these tests
+			var attemptIDs []int64
+			if err := tx.Table("student_test_attempts").Where("test_id IN ?", testIDs).Pluck("id", &attemptIDs).Error; err != nil {
+				return err
+			}
+
+			// 4. Delete student answers (referenced by attempts and questions)
+			if len(attemptIDs) > 0 {
+				if err := tx.Exec("DELETE FROM student_answers WHERE attempt_id IN ?", attemptIDs).Error; err != nil {
+					return err
 				}
-				_ = tx.Where("test_id = ?", test.ID).Delete(&domain.Question{}).Error
-				_ = tx.Delete(&domain.Test{}, test.ID).Error
+				// 5. Delete test results (referenced by attempts)
+				if err := tx.Exec("DELETE FROM test_results WHERE attempt_id IN ?", attemptIDs).Error; err != nil {
+					return err
+				}
+				// 6. Delete student test attempts
+				if err := tx.Exec("DELETE FROM student_test_attempts WHERE id IN ?", attemptIDs).Error; err != nil {
+					return err
+				}
+			}
+
+			// If there are questions, delete options, answers, and questions
+			if len(questionIDs) > 0 {
+				if err := tx.Exec("DELETE FROM student_answers WHERE question_id IN ?", questionIDs).Error; err != nil {
+					return err
+				}
+				// 7. Delete question options
+				if err := tx.Exec("DELETE FROM question_options WHERE question_id IN ?", questionIDs).Error; err != nil {
+					return err
+				}
+				// 8. Delete questions
+				if err := tx.Exec("DELETE FROM questions WHERE id IN ?", questionIDs).Error; err != nil {
+					return err
+				}
+			}
+
+			// 9. Delete tests
+			if err := tx.Exec("DELETE FROM tests WHERE id IN ?", testIDs).Error; err != nil {
+				return err
 			}
 		}
-		_ = tx.Where("test_series_id = ?", id).Delete(&domain.TestSeriesAccess{}).Error
+
+		// 10. Delete test series accesses
+		if err := tx.Exec("DELETE FROM test_series_accesses WHERE test_series_id = ?", id).Error; err != nil {
+			return err
+		}
+
+		// 11. Nullify test_series_id in payment_orders
+		if err := tx.Exec("UPDATE payment_orders SET test_series_id = NULL WHERE test_series_id = ?", id).Error; err != nil {
+			return err
+		}
+
+		// 12. Finally, delete the test series itself
 		return tx.Delete(&domain.TestSeries{}, id).Error
 	})
 }

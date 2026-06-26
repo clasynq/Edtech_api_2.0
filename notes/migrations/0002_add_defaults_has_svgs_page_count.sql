@@ -1,0 +1,2 @@
+ALTER TABLE notes ALTER COLUMN has_svgs SET DEFAULT false;
+ALTER TABLE notes ALTER COLUMN page_count SET DEFAULT 0;

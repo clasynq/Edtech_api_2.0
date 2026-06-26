@@ -180,37 +180,46 @@ func (h *HttpHandler) UpdateTeacher(c *gin.Context) {
 	// Read fields from Form Data or JSON body
 	updates := make(map[string]interface{})
 
-	// Handle multipart form
-	_ = c.Request.ParseMultipartForm(32 << 20)
-	
-	if email := c.PostForm("email"); email != "" {
-		updates["email"] = email
-	}
-	if password := c.PostForm("password"); password != "" {
-		updates["password"] = password
-	}
-	if name := c.PostForm("name"); name != "" {
-		updates["name"] = name
-	}
-	if spec := c.PostForm("specialization"); spec != "" {
-		updates["specialization"] = spec
-	}
-	if cat := c.PostForm("category"); cat != "" {
-		updates["category"] = cat
-	}
-	if dob := c.PostForm("date_of_birth"); dob != "" {
-		updates["date_of_birth"] = dob
-	}
-	if tasks := c.PostForm("tasks"); tasks != "" {
-		var tasksArr []interface{}
-		if err := json.Unmarshal([]byte(tasks), &tasksArr); err == nil {
-			updates["tasks"] = tasksArr
+	if strings.Contains(c.GetHeader("Content-Type"), "application/json") {
+		var jsonUpdates map[string]interface{}
+		if err := c.ShouldBindJSON(&jsonUpdates); err == nil {
+			for k, v := range jsonUpdates {
+				updates[k] = v
+			}
 		}
-	}
-	if assigned := c.PostForm("assigned_courses"); assigned != "" {
-		var coursesArr []interface{}
-		if err := json.Unmarshal([]byte(assigned), &coursesArr); err == nil {
-			updates["assigned_courses"] = coursesArr
+	} else {
+		// Handle multipart form
+		_ = c.Request.ParseMultipartForm(32 << 20)
+		
+		if email := c.PostForm("email"); email != "" {
+			updates["email"] = email
+		}
+		if password := c.PostForm("password"); password != "" {
+			updates["password"] = password
+		}
+		if name := c.PostForm("name"); name != "" {
+			updates["name"] = name
+		}
+		if spec := c.PostForm("specialization"); spec != "" {
+			updates["specialization"] = spec
+		}
+		if cat := c.PostForm("category"); cat != "" {
+			updates["category"] = cat
+		}
+		if dob := c.PostForm("date_of_birth"); dob != "" {
+			updates["date_of_birth"] = dob
+		}
+		if tasks := c.PostForm("tasks"); tasks != "" {
+			var tasksArr []interface{}
+			if err := json.Unmarshal([]byte(tasks), &tasksArr); err == nil {
+				updates["tasks"] = tasksArr
+			}
+		}
+		if assigned := c.PostForm("assigned_courses"); assigned != "" {
+			var coursesArr []interface{}
+			if err := json.Unmarshal([]byte(assigned), &coursesArr); err == nil {
+				updates["assigned_courses"] = coursesArr
+			}
 		}
 	}
 

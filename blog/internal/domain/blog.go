@@ -29,7 +29,7 @@ type BlogPost struct {
 	Content            string     `gorm:"column:content;type:text;not null" json:"content"`
 	Category           string     `gorm:"column:category;type:varchar(100);default:'Web Development';index" json:"category"`
 	Tags               string     `gorm:"column:tags;type:jsonb" json:"tags"` // JSON array string
-	AuthorID           int64      `gorm:"column:author_id;not null;index" json:"authorId"`
+	AuthorID           int64      `gorm:"column:author_id;not null;index" json:"author_id"`
 	Author             User       `gorm:"foreignKey:AuthorID" json:"author"`
 	BannerURL          *string    `gorm:"column:banner_url;type:varchar(500)" json:"bannerUrl"`
 	ExploreLink        *string    `gorm:"column:explore_link;type:varchar(500)" json:"exploreLink"`
@@ -46,7 +46,7 @@ type BlogPost struct {
 	Trending           bool       `gorm:"column:trending;default:false" json:"trending"`
 	Recommended        bool       `gorm:"column:recommended;default:false" json:"recommended"`
 	StaffPick          bool       `gorm:"column:staff_pick;default:false" json:"staffPick"`
-	IsRestricted       bool       `gorm:"column:is_restricted;default:false;index" json:"isRestricted"`
+	IsRestricted       bool       `gorm:"column:is_restricted;default:false;index" json:"is_restricted"`
 	CreatedAt          time.Time  `gorm:"column:created_at;type:timestamp with time zone;autoCreateTime" json:"createdAt"`
 
 	// Annotation helper fields (not persisted in DB)
@@ -167,6 +167,10 @@ type BlogRepository interface {
 	IncrementPostCounters(ctx context.Context, postID int64, updates map[string]interface{}, scoreDiff float64) error
 	CreateActivityLog(ctx context.Context, log *ActivityLog) error
 	RecordView(ctx context.Context, view *PostView) error
+
+	// Admin Queries
+	GetAdminPosts(ctx context.Context, query string, userSearch string, limit int) ([]BlogPost, error)
+	GetDistinctCategories(ctx context.Context) ([]string, error)
 }
 
 type BlogUsecase interface {
@@ -181,4 +185,9 @@ type BlogUsecase interface {
 	AddComment(ctx context.Context, userID, postID int64, content string, parentID *int64) (map[string]interface{}, error)
 	DeleteComment(ctx context.Context, userID, commentID int64) error
 	GetPostIDBySlug(ctx context.Context, slug string) (int64, error)
+
+	// Admin Operations
+	GetAdminPosts(ctx context.Context, query string, userSearch string, limit int) (map[string]interface{}, error)
+	UpdatePostAsAdmin(ctx context.Context, id int64, updates map[string]interface{}) (map[string]interface{}, error)
+	DeletePostAsAdmin(ctx context.Context, id int64) error
 }

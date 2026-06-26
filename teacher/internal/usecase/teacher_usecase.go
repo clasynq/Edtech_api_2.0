@@ -204,11 +204,18 @@ func (u *teacherUsecase) GetOverview(ctx context.Context, teacherID int64, categ
 		})
 	}
 
+	var tasksList []map[string]interface{}
+	_ = json.Unmarshal([]byte(teacher.Tasks), &tasksList)
+	if tasksList == nil {
+		tasksList = []map[string]interface{}{}
+	}
+
 	response := map[string]interface{}{
 		"profile": map[string]interface{}{
 			"name":     teacher.Name,
 			"email":    teacher.Email,
 			"photoUrl": teacher.PhotoURL,
+			"tasks":    tasksList,
 		},
 		"stats": map[string]interface{}{
 			"totalBatches":     totalBatches,
@@ -628,7 +635,7 @@ func (u *teacherUsecase) DeleteClass(ctx context.Context, teacherID, classID int
 	return nil
 }
 
-func (u *teacherUsecase) UploadNote(ctx context.Context, teacherID int64, batchID, title, fileURL string) (map[string]interface{}, error) {
+func (u *teacherUsecase) UploadNote(ctx context.Context, teacherID int64, batchID, title, fileURL, recordedClassURL, subject, topic, prerequisiteURL string) (map[string]interface{}, error) {
 	course, err := u.repo.GetCourseByBatchID(ctx, batchID)
 	if err != nil {
 		return nil, err
@@ -653,14 +660,18 @@ func (u *teacherUsecase) UploadNote(ctx context.Context, teacherID int64, batchI
 	}
 
 	note := &domain.Note{
-		Title:       title,
-		Description: "",
-		NoteType:    "batch",
-		IsFree:      false,
-		Price:       0.0,
-		BatchID:     batchID,
-		FileURL:     fileURL,
-		CreatedAt:   time.Now(),
+		Title:            title,
+		Description:      "",
+		NoteType:         "class",
+		IsFree:           false,
+		Price:            0.0,
+		BatchID:          batchID,
+		FileURL:          fileURL,
+		RecordedClassURL: recordedClassURL,
+		Subject:          subject,
+		Topic:            topic,
+		PrerequisiteURL:  prerequisiteURL,
+		CreatedAt:        time.Now(),
 	}
 
 	if course != nil {
@@ -678,11 +689,13 @@ func (u *teacherUsecase) UploadNote(ctx context.Context, teacherID int64, batchI
 	u.invalidateCache(ctx, teacherID)
 
 	return map[string]interface{}{
-		"id":        note.ID,
-		"title":     note.Title,
-		"batchId":   note.BatchID,
-		"fileUrl":   note.FileURL,
-		"createdAt": note.CreatedAt,
+		"id":               note.ID,
+		"title":            note.Title,
+		"batchId":          note.BatchID,
+		"fileUrl":          note.FileURL,
+		"recordedClassUrl": note.RecordedClassURL,
+		"prerequisiteUrl":  note.PrerequisiteURL,
+		"createdAt":        note.CreatedAt,
 	}, nil
 }
 
@@ -948,4 +961,24 @@ func (u *teacherUsecase) toInt64(val interface{}) int64 {
 		}
 	}
 	return 0
+}
+
+func (u *teacherUsecase) GetCategories(ctx context.Context, teacherID int64) ([]string, error) {
+	teacher, err := u.repo.GetTeacherByID(ctx, teacherID)
+	if err != nil {
+		return nil, err
+	}
+	if teacher == nil {
+		return nil, errors.New("teacher not found")
+	}
+
+	var list []string
+	parts := strings.Split(teacher.Category, ",")
+	for _, p := range parts {
+		trimmed := strings.TrimSpace(p)
+		if trimmed != "" {
+			list = append(list, trimmed)
+		}
+	}
+	return list, nil
 }

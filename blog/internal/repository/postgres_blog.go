@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"time"
 
@@ -290,4 +291,44 @@ func (r *postgresBlogRepository) CreateActivityLog(ctx context.Context, log *dom
 
 func (r *postgresBlogRepository) RecordView(ctx context.Context, view *domain.PostView) error {
 	return r.db.WithContext(ctx).Create(view).Error
+}
+
+func (r *postgresBlogRepository) GetAdminPosts(ctx context.Context, query string, userSearch string, limit int) ([]domain.BlogPost, error) {
+	var posts []domain.BlogPost
+	db := r.db.WithContext(ctx).Preload("Author")
+
+	if query != "" {
+		db = db.Where("LOWER(title) LIKE ? OR LOWER(excerpt) LIKE ? OR LOWER(content) LIKE ?",
+			"%"+strings.ToLower(query)+"%",
+			"%"+strings.ToLower(query)+"%",
+			"%"+strings.ToLower(query)+"%")
+	}
+
+	if userSearch != "" {
+		var authorID int64
+		if id, err := strconv.ParseInt(userSearch, 10, 64); err == nil {
+			authorID = id
+		}
+
+		if authorID > 0 {
+			db = db.Where("author_id = ? OR author_id IN (SELECT id FROM users WHERE LOWER(username) LIKE ? OR LOWER(full_name) LIKE ?)",
+				authorID, "%"+strings.ToLower(userSearch)+"%", "%"+strings.ToLower(userSearch)+"%")
+		} else {
+			db = db.Where("author_id IN (SELECT id FROM users WHERE LOWER(username) LIKE ? OR LOWER(full_name) LIKE ?)",
+				"%"+strings.ToLower(userSearch)+"%", "%"+strings.ToLower(userSearch)+"%")
+		}
+	}
+
+	if limit > 0 {
+		db = db.Limit(limit)
+	}
+
+	err := db.Order("created_at desc").Find(&posts).Error
+	return posts, err
+}
+
+func (r *postgresBlogRepository) GetDistinctCategories(ctx context.Context) ([]string, error) {
+	var categories []string
+	err := r.db.WithContext(ctx).Model(&domain.BlogPost{}).Distinct("category").Pluck("category", &categories).Error
+	return categories, err
 }

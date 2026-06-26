@@ -171,7 +171,8 @@ type TeacherUsecase interface {
 	ScheduleClass(ctx context.Context, teacherID int64, scheduleData map[string]interface{}) (map[string]interface{}, error)
 	UpdateClass(ctx context.Context, teacherID, classID int64, updates map[string]interface{}) (map[string]interface{}, error)
 	DeleteClass(ctx context.Context, teacherID, classID int64) error
-	UploadNote(ctx context.Context, teacherID int64, batchID, title, fileURL string) (map[string]interface{}, error)
+	UploadNote(ctx context.Context, teacherID int64, batchID, title, fileURL, recordedClassURL, subject, topic, prerequisiteURL string) (map[string]interface{}, error)
+	GetCategories(ctx context.Context, teacherID int64) ([]string, error)
 }
 
 type Note struct {
@@ -182,10 +183,16 @@ type Note struct {
 	IsFree      bool      `gorm:"column:is_free;type:boolean;not null" json:"isFree"`
 	Price       float64   `gorm:"column:price;type:numeric(10,2);not null" json:"price"`
 	BatchID     string    `gorm:"column:batch_id;type:varchar(50);not null" json:"batchId"`
-	FileURL     string    `gorm:"column:file_url;type:text;not null" json:"fileUrl"`
-	CreatedAt   time.Time `gorm:"column:created_at;type:timestamp with time zone;autoCreateTime" json:"createdAt"`
-	CourseID    *int64    `gorm:"column:course_id" json:"courseId"`
-	Category    string    `gorm:"column:category;type:varchar(100);not null" json:"category"`
+	FileURL          string    `gorm:"column:file_url;type:text;not null" json:"fileUrl"`
+	CreatedAt        time.Time `gorm:"column:created_at;type:timestamp with time zone;autoCreateTime" json:"createdAt"`
+	CourseID         *int64    `gorm:"column:course_id" json:"courseId"`
+	HasSvgs          bool      `gorm:"column:has_svgs;type:boolean;default:false" json:"hasSvgs"`
+	PageCount        int       `gorm:"column:page_count;type:integer;default:0" json:"pageCount"`
+	Category         string    `gorm:"column:category;type:varchar(100);not null" json:"category"`
+	RecordedClassURL string    `gorm:"column:recorded_class_url;type:text" json:"recordedClassUrl"`
+	Subject          string    `gorm:"column:subject;type:varchar(255)" json:"subject"`
+	Topic            string    `gorm:"column:topic;type:varchar(255)" json:"topic"`
+	PrerequisiteURL  string    `gorm:"column:prerequisite_url;type:text" json:"prerequisiteUrl"`
 }
 
 func (Note) TableName() string {

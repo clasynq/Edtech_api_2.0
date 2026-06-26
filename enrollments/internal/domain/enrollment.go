@@ -93,6 +93,9 @@ type Note struct {
 	PageCount   int       `gorm:"column:page_count;type:integer;default:0"`
 	Category    string    `gorm:"column:category;type:varchar(100);not null"`
 	Slug        string    `gorm:"column:slug;type:varchar(100)"`
+	Subject     string    `gorm:"column:subject;type:varchar(255)"`
+	Topic       string    `gorm:"column:topic;type:varchar(255)"`
+	PrerequisiteURL string `gorm:"column:prerequisite_url;type:text"`
 }
 
 func (Note) TableName() string {

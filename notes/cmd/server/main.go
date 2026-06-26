@@ -59,6 +59,22 @@ func main() {
 		log.Fatalf("failed to connect to database: %v", err)
 	}
 
+	// 3.5. Run DB migrations automatically on startup
+	log.Println("Running database migrations...")
+	migrations := []string{
+		"ALTER TABLE notes ADD COLUMN IF NOT EXISTS recorded_class_url text",
+		"ALTER TABLE notes ADD COLUMN IF NOT EXISTS subject varchar(255)",
+		"ALTER TABLE notes ADD COLUMN IF NOT EXISTS topic varchar(255)",
+		"ALTER TABLE notes ADD COLUMN IF NOT EXISTS prerequisite_url text",
+		"ALTER TABLE notes ALTER COLUMN has_svgs SET DEFAULT false",
+		"ALTER TABLE notes ALTER COLUMN page_count SET DEFAULT 0",
+	}
+	for _, sqlQuery := range migrations {
+		if err := db.Exec(sqlQuery).Error; err != nil {
+			log.Printf("Warning: failed to execute migration [%s]: %v", sqlQuery, err)
+		}
+	}
+
 	// 4. Connect to Redis (optional)
 	var rdb *redis.Client
 	if cfg.RedisURL != "" {

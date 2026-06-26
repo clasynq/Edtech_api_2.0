@@ -54,6 +54,15 @@ func (h *HttpHandler) RegisterRoutes(r *gin.Engine, authMiddleware gin.HandlerFu
 			// Comments
 			api.POST("/:slug/comment", h.AddComment)
 			api.DELETE("/comments/:id", h.DeleteComment)
+
+			// Admin operations
+			admin := api.Group("/admin")
+			admin.Use(RequireAdmin())
+			{
+				admin.GET("/posts", h.GetAdminPosts)
+				admin.PATCH("/posts/:id", h.UpdateAdminBlogPost)
+				admin.DELETE("/posts/:id", h.DeleteAdminBlogPost)
+			}
 		}
 	}
 }
@@ -402,4 +411,113 @@ func (h *HttpHandler) saveFileLocally(c *gin.Context, folder string) (string, er
 	relPath := filepath.ToSlash(filepath.Join(folder, filename))
 	baseMediaURL := strings.TrimSuffix(h.baseURL, "/")
 	return fmt.Sprintf("%s/media/%s", baseMediaURL, relPath), nil
+}
+
+func (h *HttpHandler) GetAdminPosts(c *gin.Context) {
+	q := c.Query("q")
+	userSearch := c.Query("user_search")
+	limitStr := c.DefaultQuery("limit", "100")
+
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit <= 0 {
+		limit = 100
+	}
+
+	res, err := h.usecase.GetAdminPosts(c.Request.Context(), q, userSearch, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "An error occurred.", "detail": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, res)
+}
+
+func (h *HttpHandler) UpdateAdminBlogPost(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid post ID."})
+		return
+	}
+
+	var updates map[string]interface{}
+	contentType := c.ContentType()
+	if strings.Contains(contentType, "multipart/form-data") {
+		updates = make(map[string]interface{})
+		if val, ok := c.GetPostForm("is_restricted"); ok {
+			updates["is_restricted"] = val == "true"
+		}
+		if val, ok := c.GetPostForm("title"); ok { updates["title"] = val }
+		if val, ok := c.GetPostForm("excerpt"); ok { updates["excerpt"] = val }
+		if val, ok := c.GetPostForm("content"); ok { updates["content"] = val }
+		if val, ok := c.GetPostForm("category"); ok { updates["category"] = val }
+		if val, ok := c.GetPostForm("exploreLink"); ok { updates["exploreLink"] = val }
+		if val, ok := c.GetPostForm("explore_link"); ok { updates["exploreLink"] = val }
+		if val, ok := c.GetPostForm("imageUrl"); ok { updates["imageUrl"] = val }
+		if val, ok := c.GetPostForm("image_url"); ok { updates["imageUrl"] = val }
+		if val, ok := c.GetPostForm("videoUrl"); ok { updates["videoUrl"] = val }
+		if val, ok := c.GetPostForm("video_url"); ok { updates["videoUrl"] = val }
+		if val, ok := c.GetPostForm("tags"); ok {
+			var tags []string
+			if err := json.Unmarshal([]byte(val), &tags); err == nil {
+				updates["tags"] = tags
+			} else {
+				parts := strings.Split(val, ",")
+				var cleaned []string
+				for _, p := range parts {
+					if strings.TrimSpace(p) != "" {
+						cleaned = append(cleaned, strings.TrimSpace(p))
+					}
+				}
+				updates["tags"] = cleaned
+			}
+		}
+
+		// Save banner locally if uploaded
+		_, _, err := c.Request.FormFile("banner")
+		if err == nil {
+			fileURL, err := h.saveFileLocally(c, "banners")
+			if err == nil {
+				updates["bannerUrl"] = fileURL
+			} else {
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"message": "Banner upload failed.",
+					"detail":  err.Error(),
+				})
+				return
+			}
+		} else if bannerFormVal, ok := c.GetPostForm("banner"); ok && bannerFormVal == "" {
+			updates["bannerUrl"] = nil
+		}
+	} else {
+		if err := c.ShouldBindJSON(&updates); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid updates input."})
+			return
+		}
+	}
+
+	res, err := h.usecase.UpdatePostAsAdmin(c.Request.Context(), id, updates)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, res["post"])
+}
+
+func (h *HttpHandler) DeleteAdminBlogPost(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid post ID."})
+		return
+	}
+
+	err = h.usecase.DeletePostAsAdmin(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+		return
+	}
+
+	c.Status(http.StatusNoContent)
 }

@@ -527,3 +527,106 @@ func (u *blogUsecase) GetPostIDBySlug(ctx context.Context, slug string) (int64, 
 	}
 	return post.ID, nil
 }
+
+func (u *blogUsecase) GetAdminPosts(ctx context.Context, query string, userSearch string, limit int) (map[string]interface{}, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	posts, err := u.repo.GetAdminPosts(ctx, query, userSearch, limit)
+	if err != nil {
+		return nil, err
+	}
+	categories, err := u.repo.GetDistinctCategories(ctx)
+	if err != nil {
+		categories = []string{}
+	}
+
+	return map[string]interface{}{
+		"posts":      posts,
+		"categories": categories,
+	}, nil
+}
+
+func (u *blogUsecase) UpdatePostAsAdmin(ctx context.Context, id int64, updates map[string]interface{}) (map[string]interface{}, error) {
+	post, err := u.repo.GetPostByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if post == nil {
+		return nil, errors.New("Article not found.")
+	}
+
+	if val, ok := updates["is_restricted"].(bool); ok {
+		post.IsRestricted = val
+	}
+	if val, ok := updates["title"].(string); ok {
+		post.Title = val
+	}
+	if val, ok := updates["excerpt"].(string); ok {
+		post.Excerpt = val
+	}
+	if val, ok := updates["content"].(string); ok {
+		if len(val) > 60000 {
+			return nil, errors.New("Content is too long. Maximum limit is 60,000 characters.")
+		}
+		post.Content = val
+	}
+	if val, ok := updates["category"].(string); ok {
+		post.Category = val
+	}
+	if val, ok := updates["bannerUrl"]; ok {
+		if val == nil {
+			post.BannerURL = nil
+		} else if s, ok := val.(string); ok {
+			post.BannerURL = &s
+		}
+	}
+	if val, ok := updates["exploreLink"]; ok {
+		if val == nil {
+			post.ExploreLink = nil
+		} else if s, ok := val.(string); ok {
+			post.ExploreLink = &s
+		}
+	}
+	if val, ok := updates["imageUrl"]; ok {
+		if val == nil {
+			post.ImageURL = nil
+		} else if s, ok := val.(string); ok {
+			post.ImageURL = &s
+		}
+	}
+	if val, ok := updates["videoUrl"]; ok {
+		if val == nil {
+			post.VideoURL = nil
+		} else if s, ok := val.(string); ok {
+			post.VideoURL = &s
+		}
+	}
+	if val, ok := updates["tags"]; ok {
+		if s, ok := val.(string); ok {
+			post.Tags = s
+		} else if raw, err := json.Marshal(val); err == nil {
+			post.Tags = string(raw)
+		}
+	}
+
+	if err := u.repo.UpdatePost(ctx, post); err != nil {
+		return nil, err
+	}
+
+	return map[string]interface{}{
+		"post": post,
+	}, nil
+}
+
+func (u *blogUsecase) DeletePostAsAdmin(ctx context.Context, id int64) error {
+	post, err := u.repo.GetPostByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if post == nil {
+		return errors.New("Article not found.")
+	}
+
+	return u.repo.DeletePost(ctx, id)
+}

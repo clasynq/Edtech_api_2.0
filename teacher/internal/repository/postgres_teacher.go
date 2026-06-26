@@ -32,17 +32,43 @@ func (r *postgresTeacherRepository) GetTeacherByID(ctx context.Context, id int64
 }
 
 func (r *postgresTeacherRepository) GetCoursesByTeacher(ctx context.Context, teacherID int64, category string) ([]domain.Course, error) {
+	teacher, err := r.GetTeacherByID(ctx, teacherID)
+	if err != nil {
+		return nil, err
+	}
+	if teacher == nil {
+		return nil, errors.New("teacher not found")
+	}
+
+	allowedCats := parseCategories(teacher.Category)
+	if len(allowedCats) == 0 {
+		return []domain.Course{}, nil
+	}
+
 	var courses []domain.Course
 	dbQuery := r.db.WithContext(ctx).Table("courses").
 		Joins("LEFT JOIN courses_teachers ON courses_teachers.course_id = courses.id").
 		Where("courses.teacher_id = ? OR courses_teachers.teacher_id = ?", teacherID, teacherID).
 		Distinct("courses.*")
 
+	dbQuery = dbQuery.Where("LOWER(courses.category) IN ?", allowedCats)
+
 	if category != "" {
-		dbQuery = dbQuery.Where("LOWER(courses.category) = ?", strings.ToLower(category))
+		categoryLower := strings.ToLower(strings.TrimSpace(category))
+		isAllowed := false
+		for _, ac := range allowedCats {
+			if ac == categoryLower {
+				isAllowed = true
+				break
+			}
+		}
+		if !isAllowed {
+			return []domain.Course{}, nil
+		}
+		dbQuery = dbQuery.Where("LOWER(courses.category) = ?", categoryLower)
 	}
 	
-	err := dbQuery.Find(&courses).Error
+	err = dbQuery.Find(&courses).Error
 	return courses, err
 }
 
@@ -60,18 +86,40 @@ func (r *postgresTeacherRepository) GetEnrollmentsByCourses(ctx context.Context,
 }
 
 func (r *postgresTeacherRepository) GetClassSchedulesByTeacher(ctx context.Context, teacherID int64, category string) ([]domain.ClassSchedule, error) {
+	teacher, err := r.GetTeacherByID(ctx, teacherID)
+	if err != nil {
+		return nil, err
+	}
+	if teacher == nil {
+		return nil, errors.New("teacher not found")
+	}
+
+	allowedCats := parseCategories(teacher.Category)
+	if len(allowedCats) == 0 {
+		return []domain.ClassSchedule{}, nil
+	}
+
 	var list []domain.ClassSchedule
-	dbQuery := r.db.WithContext(ctx).Preload("Course").Preload("Subject").Preload("Teacher")
+	dbQuery := r.db.WithContext(ctx).Preload("Course").Preload("Subject").Preload("Teacher").
+		Joins("JOIN courses ON courses.id = class_schedules.course_id").
+		Where("class_schedules.teacher_id = ? AND LOWER(courses.category) IN ?", teacherID, allowedCats)
 	
 	if category != "" {
-		dbQuery = dbQuery.
-			Joins("JOIN courses ON courses.id = class_schedules.course_id").
-			Where("class_schedules.teacher_id = ? AND LOWER(courses.category) = ?", teacherID, strings.ToLower(category))
-	} else {
-		dbQuery = dbQuery.Where("class_schedules.teacher_id = ?", teacherID)
+		categoryLower := strings.ToLower(strings.TrimSpace(category))
+		isAllowed := false
+		for _, ac := range allowedCats {
+			if ac == categoryLower {
+				isAllowed = true
+				break
+			}
+		}
+		if !isAllowed {
+			return []domain.ClassSchedule{}, nil
+		}
+		dbQuery = dbQuery.Where("LOWER(courses.category) = ?", categoryLower)
 	}
 	
-	err := dbQuery.Order("class_date DESC, start_time DESC").Find(&list).Error
+	err = dbQuery.Order("class_schedules.class_date DESC, class_schedules.start_time DESC").Find(&list).Error
 	return list, err
 }
 
@@ -214,5 +262,17 @@ func (r *postgresTeacherRepository) GetCourseByBatchID(ctx context.Context, batc
 		return nil, nil
 	}
 	return &course, err
+}
+
+func parseCategories(catStr string) []string {
+	var list []string
+	parts := strings.Split(catStr, ",")
+	for _, p := range parts {
+		trimmed := strings.TrimSpace(p)
+		if trimmed != "" {
+			list = append(list, strings.ToLower(trimmed))
+		}
+	}
+	return list
 }
 

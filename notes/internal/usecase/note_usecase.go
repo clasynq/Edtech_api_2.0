@@ -191,8 +191,20 @@ func (u *noteUsecase) UpdateNote(ctx context.Context, idOrSlug string, updates m
 			if existing != nil {
 				return nil, errors.New("slug is already in use")
 			}
-			note.Slug = newSlug
 		}
+	}
+
+	if val, ok := updates["recordedClassUrl"]; ok {
+		note.RecordedClassURL = val.(string)
+	}
+	if val, ok := updates["subject"]; ok {
+		note.Subject = val.(string)
+	}
+	if val, ok := updates["topic"]; ok {
+		note.Topic = val.(string)
+	}
+	if val, ok := updates["prerequisiteUrl"]; ok {
+		note.PrerequisiteURL = val.(string)
 	}
 
 	if err := u.repo.UpdateNote(ctx, note); err != nil {

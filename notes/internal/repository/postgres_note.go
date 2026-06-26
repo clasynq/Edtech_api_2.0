@@ -103,7 +103,21 @@ func (r *postgresNoteRepository) UpdateNote(ctx context.Context, note *domain.No
 }
 
 func (r *postgresNoteRepository) DeleteNote(ctx context.Context, id int64) error {
-	return r.db.WithContext(ctx).Delete(&domain.Note{}, id).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// 1. Delete referencing note_accesses records
+		if err := tx.Exec("DELETE FROM note_accesses WHERE note_id = ?", id).Error; err != nil {
+			return err
+		}
+		// 2. Nullify referencing payment_orders records
+		if err := tx.Exec("UPDATE payment_orders SET note_id = NULL WHERE note_id = ?", id).Error; err != nil {
+			return err
+		}
+		// 3. Delete the note record
+		if err := tx.Delete(&domain.Note{}, id).Error; err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 func (r *postgresNoteRepository) GetStudentByUserID(ctx context.Context, userID int64) (*domain.Student, error) {

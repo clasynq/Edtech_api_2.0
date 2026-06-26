@@ -135,7 +135,7 @@ func (r *postgresAdminRepository) ListTeachers(ctx context.Context, query, categ
 	var list []domain.Teacher
 	dbQuery := r.db.WithContext(ctx)
 	if category != "" {
-		dbQuery = dbQuery.Where("LOWER(category) = ?", strings.ToLower(category))
+		dbQuery = dbQuery.Where("LOWER(category) LIKE ?", "%"+strings.ToLower(category)+"%")
 	}
 	if query != "" {
 		q := "%" + strings.ToLower(query) + "%"
@@ -191,10 +191,38 @@ func (r *postgresAdminRepository) ListStudents(ctx context.Context, query, categ
 	return students, err
 }
 
+func (r *postgresAdminRepository) GetStudentEnrollmentInfo(ctx context.Context, studentIDs []int64) (map[int64][]string, map[int64][]string, error) {
+	if len(studentIDs) == 0 {
+		return make(map[int64][]string), make(map[int64][]string), nil
+	}
+	var results []struct {
+		StudentID  int64  `gorm:"column:student_id"`
+		CourseName string `gorm:"column:course_name"`
+		BatchID    string `gorm:"column:batch_id"`
+	}
+
+	err := r.db.WithContext(ctx).Table("enrollments").
+		Select("enrollments.student_id, courses.course_name, courses.batch_id").
+		Joins("JOIN courses ON courses.id = enrollments.course_id").
+		Where("enrollments.student_id IN ?", studentIDs).
+		Scan(&results).Error
+	if err != nil {
+		return nil, nil, err
+	}
+
+	coursesMap := make(map[int64][]string)
+	batchesMap := make(map[int64][]string)
+	for _, res := range results {
+		coursesMap[res.StudentID] = append(coursesMap[res.StudentID], res.CourseName)
+		batchesMap[res.StudentID] = append(batchesMap[res.StudentID], res.BatchID)
+	}
+	return coursesMap, batchesMap, nil
+}
+
 func (r *postgresAdminRepository) GetCoursesSales(ctx context.Context, category string, start, end time.Time) ([]domain.CourseSales, error) {
 	var list []domain.CourseSales
 	query := r.db.WithContext(ctx).Table("courses").
-		Select("courses.id, courses.course_name, courses.batch_id, courses.final_price, COUNT(enrollments.id) as sales_count").
+		Select("courses.id, courses.course_name, courses.batch_id, courses.final_price as price, COUNT(enrollments.id) as sales_count").
 		Joins("LEFT JOIN enrollments ON enrollments.course_id = courses.id AND enrollments.created_at BETWEEN ? AND ?", start, end).
 		Group("courses.id, courses.course_name, courses.batch_id, courses.final_price").
 		Order("courses.course_name")

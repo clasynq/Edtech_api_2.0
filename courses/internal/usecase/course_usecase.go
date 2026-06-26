@@ -37,14 +37,15 @@ func (u *courseUsecase) GetCourseByIDOrSlug(ctx context.Context, idOrSlug string
 
 func (u *courseUsecase) CreateCourse(ctx context.Context, course *domain.Course, teacherIDs []int64, subjectIDs []int64) error {
 	// 1. Validate Category
-	if course.Category != "" {
-		exists, err := u.repo.CategoryExists(ctx, course.Category)
-		if err != nil {
-			return err
-		}
-		if !exists {
-			return errors.New("Select a valid category. New categories must be created in the Category Management section.")
-		}
+	if course.Category == "" {
+		return errors.New("Category is required.")
+	}
+	exists, err := u.repo.CategoryExists(ctx, course.Category)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return errors.New("Select a valid category. New categories must be created in the Category Management section.")
 	}
 
 	// 2. Generate slug if not present
@@ -96,6 +97,9 @@ func (u *courseUsecase) UpdateCourse(ctx context.Context, idOrSlug string, updat
 	}
 	if val, ok := updates["category"]; ok {
 		catStr := val.(string)
+		if catStr == "" {
+			return nil, errors.New("Category is required.")
+		}
 		exists, err := u.repo.CategoryExists(ctx, catStr)
 		if err != nil {
 			return nil, err
