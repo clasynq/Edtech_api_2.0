@@ -1,14 +1,11 @@
-================================================================================
-FULL GOLANG MICROSERVICES VPS DEPLOYMENT & PRODUCTION GUIDE
-================================================================================
-Project: Clasynq LMS (Go Microservices Backend & React Frontend)
-Author: Surajit Sutradhar
-Updated for: 10 Go Microservices, pgBouncer Database Pooling, Redis Caching, 
-             and Nginx API Gateway routing.
-================================================================================
+# Full Golang Microservices VPS Deployment & Production Guide
 
-FINAL PRODUCTION ARCHITECTURE
-================================================================================
+- **Project:** Clasynq LMS (Go Microservices Backend & React Frontend)
+- **Author:** Surajit Sutradhar
+- **Updated for:** 10 Go Microservices, pgBouncer Database Pooling, Redis Caching, and Nginx API Gateway routing.
+
+
+## Final Production Architecture
 User Request 
    ↓
 [ www.clasynq.in ] (Render Frontend - React)
@@ -38,10 +35,8 @@ User Request
    ├── /api/me/enrollments     → proxy_pass http://127.0.0.1:8083 (enrollments)
    ├── /api/me/*               → proxy_pass http://127.0.0.1:8090 (dashboard_profile)
    └── /media/*                → Served statically by Nginx alias
-================================================================================
 
-MICROSERVICE ROUTING & PORTS
-================================================================================
+## Microservice Routing & Ports
 | Service Folder       | Port | Default API Routes                                 |
 | :---                 | :--- | :---                                               |
 | `auth`               | 8081 | /api/auth/*, /api/me (change-password, notify)     |
@@ -54,10 +49,8 @@ MICROSERVICE ROUTING & PORTS
 | `admin`              | 8088 | /api/admin/*, /api/platform/*, /api/careers/*      |
 | `teacher`            | 8089 | /api/teacher/*                                     |
 | `dashboard_profile`  | 8090 | /api/me/* (Profile CRUD, FollowToggle, avatar)     |
-================================================================================
 
-STEP 1 — BUY VPS
-================================================================================
+## STEP 1 — Buy VPS
 Purchase a Hostinger VPS.
 Recommended minimum specifications for Go microservices (much lighter than Django):
 - KVM 2 Plan
@@ -66,15 +59,13 @@ Recommended minimum specifications for Go microservices (much lighter than Djang
 - 100 GB NVMe SSD
 Choose OS: Ubuntu 24.04 LTS (Minimal)
 
-STEP 2 — SSH CONNECT TO VPS
-================================================================================
+## STEP 2 — SSH Connect To VPS
 From your local command line:
 ```powershell
 ssh root@YOUR_SERVER_IP
 ```
 
-STEP 3 — CREATE SECURED USER
-================================================================================
+## STEP 3 — Create Secured User
 Never run your applications as the root user. Create a dedicated user with sudo privileges:
 ```bash
 # Create user
@@ -87,15 +78,13 @@ usermod -aG sudo clasynq
 su - clasynq
 ```
 
-STEP 4 — UPDATE AND UPGRADE PACKAGES
-================================================================================
+## STEP 4 — Update And Upgrade Packages
 Update the system's package catalog and install upgrades:
 ```bash
 sudo apt update && sudo apt upgrade -y
 ```
 
-STEP 5 — INSTALL SYSTEM PACKAGES & GO
-================================================================================
+## STEP 5 — Install System Packages & Go
 Install required dependencies, databases, servers, and utilities. Since we are running Go, we will also install Go 1.26.1 officially (do not use default apt-get golang as it is outdated):
 ```bash
 sudo apt install git nginx postgresql postgresql-contrib redis-server fail2ban certbot python3-certbot-nginx pgbouncer -y
@@ -116,8 +105,7 @@ go version
 # Output should return: go version go1.26.1 linux/amd64
 ```
 
-STEP 6 — SETUP SSH KEYS FOR GITHUB
-================================================================================
+## STEP 6 — Setup SSH Keys For Github
 Generate a secure Ed25519 key pair to safely authenticate git pulls:
 ```bash
 ssh-keygen -t ed25519 -C "github-action-deploy"
@@ -133,8 +121,7 @@ cat ~/.ssh/id_ed25519.pub
    ssh -T git@github.com
    ```
 
-STEP 7 — CLONE PROJECT AND PREPARE BINARY DIRECTORY
-================================================================================
+## STEP 7 — Clone Project And Prepare Binary Directory
 Clone your codebase and navigate to the project directory:
 ```bash
 git clone git@github.com:YOUR_USERNAME/REPO.git /home/clasynq/clasynq
@@ -144,8 +131,7 @@ cd /home/clasynq/clasynq
 mkdir -p /home/clasynq/services/bin
 ```
 
-STEP 8 — CONFIGURATION OF POSTGRESQL
-================================================================================
+## STEP 8 — Configuration Of POSTGRESQL
 Log into PostgreSQL console and configure your dedicated, isolated user:
 ```bash
 sudo -u postgres psql
@@ -158,8 +144,7 @@ GRANT ALL PRIVILEGES ON DATABASE clasynq TO clasynq;
 \q
 ```
 
-STEP 9 — CONFIGURATION OF REDIS CACHE
-================================================================================
+## STEP 9 — Configuration Of REDIS Cache
 Start and enable the Redis server locally:
 ```bash
 sudo systemctl start redis-server
@@ -173,8 +158,7 @@ redis-cli ping
 > [!NOTE]
 > This local Redis server is used for active session validation, Redis-based token caching, and Turnstile registration OTP state checks. It avoids database table lock overhead entirely.
 
-STEP 10 — CREATE SYSTEM ENVIRONMENT VARIABLES (.env)
-================================================================================
+## STEP 10 — Create System Environment Variables (.Env)
 Create a single unified `.env` configuration file in the project root folder. All Go microservices will load shared database/Redis connection details and security keys from this single file via systemd:
 ```bash
 nano /home/clasynq/clasynq/.env
@@ -222,8 +206,7 @@ DISABLE_RATE_LIMITING=False
 MEDIA_ROOT=/home/clasynq/Medias/
 ```
 
-STEP 11 — BUILD THE GO MICROSERVICES
-================================================================================
+## STEP 11 — Build The Go Microservices
 Navigate to the root workspace folder (where `go.work` resides) and download dependencies, then compile all 10 microservices:
 ```bash
 cd /home/clasynq/clasynq
@@ -251,8 +234,7 @@ go build -o /home/clasynq/services/bin/teacher-service ./teacher/cmd/server/main
 go build -o /home/clasynq/services/bin/dashboard_profile-service ./dashboard_profile/cmd/server/main.go
 ```
 
-STEP 12 — CREATE SYSTEMD SERVICES FOR GO MICROSERVICES
-================================================================================
+## STEP 12 — Create Systemd Services For Go Microservices
 Create individual daemon service files for each of the 10 Go microservices so they run continuously in the background and auto-restart.
 
 We will write a systemd configuration file for each service using a unified template.
@@ -305,8 +287,7 @@ sudo systemctl start csq-auth csq-courses csq-enrollments csq-notes csq-test-ser
 sudo systemctl status csq-auth
 ```
 
-STEP 13 — NGINX REVERSE PROXY & API GATEWAY SETUP
-================================================================================
+## STEP 13 — Nginx Reverse Proxy & API Gateway Setup
 Configure Nginx to act as the primary API Gateway routing requests to the corresponding Go microservices by checking URL path prefixes:
 ```bash
 sudo nano /etc/nginx/sites-available/clasynq
@@ -553,8 +534,7 @@ sudo nginx -t
 sudo systemctl restart nginx
 ```
 
-STEP 14 — DOMAIN DNS CONFIGURATION (CLOUDFLARE)
-================================================================================
+## STEP 14 — Domain DNS Configuration (Cloudflare)
 Configure your records inside the Cloudflare DNS Dashboard:
 - **A Record** (for Go API Gateway):
   - **Type**: `A`
@@ -567,8 +547,7 @@ Configure your records inside the Cloudflare DNS Dashboard:
   - **Target**: Your Render deployment URL (e.g., `clasynq-02.onrender.com`)
   - **Proxy Status**: Proxied (Orange Cloud)
 
-STEP 15 — RENDER FRONTEND DEPLOYMENT
-================================================================================
+## STEP 15 — Render Frontend Deployment
 Deploy your React frontend to Render with these settings:
 - **Build Command**: `npm install && npm run build`
 - **Publish Directory**: `dist`
@@ -579,16 +558,14 @@ Deploy your React frontend to Render with these settings:
   - **Destination**: `/index.html`
   - **Action**: `Rewrite`
 
-STEP 16 — ACQUIRE HTTPS SSL CERTIFICATE
-================================================================================
+## STEP 16 — Acquire HTTPS SSL Certificate
 Use Certbot to request a free Let's Encrypt certificate for Nginx:
 ```bash
 sudo certbot --nginx -d api.clasynq.in
 # Choose option to redirect HTTP to HTTPS automatically if asked
 ```
 
-STEP 17 — INFRASTRUCTURE SECURITY HARDENING
-================================================================================
+## STEP 17 — Infrastructure Security Hardening
 ##### A. Configure Fail2Ban (SSH Brute-force Prevention)
 ```bash
 sudo systemctl enable fail2ban
@@ -621,8 +598,7 @@ sudo ufw allow 443/tcp
 sudo ufw enable
 ```
 
-STEP 18 — GITHUB ACTIONS AUTO DEPLOYMENT
-================================================================================
+## STEP 18 — Github Actions Auto Deployment
 Configure GitHub actions to build and reload Go microservices on commit.
 
 1. Configure `clasynq` user to allow restarting systemd services without password prompt:
@@ -698,8 +674,7 @@ jobs:
    - `VPS_SSH_KEY`: Add the raw content of your private SSH key (`cat ~/.ssh/id_ed25519_clasynq_go` from VPS).
    - `VPS_SSH_PORT`: Add your custom SSH port (e.g. `22022` or `22`).
 
-STEP 19 — AUTOMATED DAILY POSTGRESQL BACKUPS
-================================================================================
+## STEP 19 — Automated Daily POSTGRESQL Backups
 Set up automated daily backups:
 1. Create a backups directory:
    ```bash
@@ -714,8 +689,7 @@ Set up automated daily backups:
    0 2 * * * pg_dump -U clasynq clasynq > /home/clasynq/db_backups/backup_$(date +\%F).sql
    ```
 
-STEP 20 — PRODUCTION MONITORING & LOGS
-================================================================================
+## STEP 20 — Production Monitoring & Logs
 Monitor live logs for any of the 10 Go services:
 ```bash
 # Live logs for auth service
@@ -732,8 +706,7 @@ sudo tail -f /var/log/nginx/access.log
 sudo tail -f /var/log/nginx/error.log
 ```
 
-STEP 21 — RAZORPAY PAYMENT GATEWAY & WEBHOOK CONFIGURATION
-================================================================================
+## STEP 21 — Razorpay Payment Gateway & Webhook Configuration
 ##### A. Generate Live API Keys
 1. Go to the [Razorpay Dashboard](https://dashboard.razorpay.com) and switch to **Live Mode**.
 2. Navigate to **Account & Settings** -> **API Keys** -> **Generate Live Key**.
@@ -758,8 +731,7 @@ Save the file and restart your enrollments daemon:
 sudo systemctl restart csq-enrollments
 ```
 
-STEP 22 — DEPLOYING PGBOUNCER FOR DATABASE POOLING
-================================================================================
+## STEP 22 — Deploying PGBOUNCER For Database Pooling
 To handle 10,000+ database connections without PostgreSQL connection exhaustion:
 
 1. **Configure pgBouncer**:
@@ -790,8 +762,7 @@ To handle 10,000+ database connections without PostgreSQL connection exhaustion:
    netstat -tuln | grep 6432
    ```
 
-STEP 23 — CLOUDFLARE SETUP & RESTORING REAL CLIENT IPS
-================================================================================
+## STEP 23 — Cloudflare Setup & Restoring Real Client Ips
 ##### A. Configure SSL/TLS Mode
 Log into Cloudflare, go to **SSL/TLS -> Overview** and set encryption mode to **Flexible**.
 
@@ -842,8 +813,7 @@ Reload Nginx:
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-STEP 24 — CENTRALIZED DATABASE MANAGEMENT TOOL (MIGRATIONS & FLUSH)
-================================================================================
+## STEP 24 — Centralized Database Management Tool (Migrations & Flush)
 To make the transition from Django seamless, a centralized database management utility is provided at the root folder via `./manage.ps1` (for Windows PowerShell) and `./manage.sh` (for Linux/macOS/Bash).
 
 This tool interacts with the database schema dynamically using GORM and automates your database operations across all 10 microservices.
@@ -888,6 +858,4 @@ To run manual SQL queries on your VPS database:
 sudo -u postgres psql -d clasynq
 ```
 
-================================================================================
-END OF PRODUCTION GUIDE
-================================================================================
+## End Of Production Guide
