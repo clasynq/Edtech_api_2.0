@@ -722,9 +722,12 @@ func getListFromForm(c *gin.Context, fieldName string) []int64 {
 
 	var ids []int64
 	for _, v := range values {
-		v = strings.TrimSpace(v)
-		if id, err := strconv.ParseInt(v, 10, 64); err == nil {
-			ids = append(ids, id)
+		parts := strings.Split(v, ",")
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			if id, err := strconv.ParseInt(part, 10, 64); err == nil {
+				ids = append(ids, id)
+			}
 		}
 	}
 	return ids
