@@ -2,7 +2,9 @@ package repository
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
+	"math/big"
 	"strings"
 
 	"clasynq/api/auth/internal/domain"
@@ -170,6 +172,22 @@ func (r *postgresUserRepository) DeletePendingRegistration(ctx context.Context, 
 	return r.db.WithContext(ctx).Where("LOWER(email) = ?", strings.ToLower(email)).Delete(&domain.PendingRegistration{}).Error
 }
 
+func generateReferralCode(tx *gorm.DB) string {
+	const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	for {
+		result := make([]byte, 8)
+		for i := 0; i < 8; i++ {
+			num, _ := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
+			result[i] = charset[num.Int64()]
+		}
+		code := "CSQ-" + string(result)
+		var count int64
+		if err := tx.Model(&domain.User{}).Where("referral_code = ?", code).Count(&count).Error; err == nil && count == 0 {
+			return code
+		}
+	}
+}
+
 func (r *postgresUserRepository) CreateUserFromPending(ctx context.Context, pending *domain.PendingRegistration) (*domain.User, error) {
 	var user domain.User
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -179,6 +197,7 @@ func (r *postgresUserRepository) CreateUserFromPending(ctx context.Context, pend
 			ContactNumber: pending.ContactNumber,
 			Email:         strings.ToLower(pending.Email),
 			Password:      pending.PasswordHash,
+			ReferralCode:  generateReferralCode(tx),
 		}
 
 		// Save User

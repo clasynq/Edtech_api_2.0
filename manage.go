@@ -112,6 +112,14 @@ func connectDB(dbURL string) *gorm.DB {
 // MIGRATE COMMAND
 // ----------------------------------------------------
 func runMigrate(dbURL string) {
+	// Populate missing referral codes for existing users before AutoMigrate runs,
+	// to prevent duplicate key constraint violations when creating the unique index.
+	dbInit := connectDB(dbURL)
+	populateMissingReferralCodes(dbInit)
+	if sqlDB, err := dbInit.DB(); err == nil {
+		sqlDB.Close()
+	}
+
 	// 1. Run AutoMigrate for each service using temporary generator files
 	runGormAutoMigrate(dbURL)
 
@@ -243,6 +251,55 @@ func runMigrate(dbURL string) {
 		fmt.Println("Database is already up to date. No pending migrations.")
 	} else {
 		fmt.Printf("Success: Applied %d migration(s) successfully.\n", migrationsApplied)
+	}
+}
+
+func populateMissingReferralCodes(db *gorm.DB) {
+	fmt.Println("[Migrate] Checking for users with missing referral codes...")
+
+	type User struct {
+		ID           int64
+		ReferralCode string `gorm:"column:referral_code"`
+	}
+
+	var users []User
+	err := db.Raw("SELECT id, referral_code FROM users WHERE referral_code = '' OR referral_code IS NULL").Scan(&users).Error
+	if err != nil {
+		log.Printf("Warning: Failed to fetch users with missing referral codes: %v", err)
+		return
+	}
+
+	if len(users) == 0 {
+		fmt.Println("[Migrate] All existing users have valid referral codes.")
+		return
+	}
+
+	fmt.Printf("[Migrate] Generating unique referral codes for %d user(s)...\n", len(users))
+	const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+	for _, u := range users {
+		var code string
+		for {
+			result := make([]byte, 8)
+			for i := 0; i < 8; i++ {
+				num, _ := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
+				result[i] = charset[num.Int64()]
+			}
+			code = "CSQ-" + string(result)
+
+			var count int64
+			err = db.Table("users").Where("referral_code = ?", code).Count(&count).Error
+			if err == nil && count == 0 {
+				break
+			}
+		}
+
+		err = db.Exec("UPDATE users SET referral_code = ? WHERE id = ?", code, u.ID).Error
+		if err != nil {
+			log.Printf("Warning: Failed to update referral code for user ID %d: %v", u.ID, err)
+		} else {
+			fmt.Printf("[Migrate] Assigned code %s to user ID %d\n", code, u.ID)
+		}
 	}
 }
 
