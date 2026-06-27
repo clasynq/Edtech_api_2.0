@@ -155,7 +155,7 @@ func (r *postgresTeacherRepository) GetOrCreateEnrollment(ctx context.Context, s
 }
 
 func (r *postgresTeacherRepository) CreateClassSchedule(ctx context.Context, schedule *domain.ClassSchedule) error {
-	return r.db.WithContext(ctx).Omit(clause.Associations).Create(schedule).Error
+	return r.db.WithContext(ctx).Omit("Teacher", "Course", "Subject").Create(schedule).Error
 }
 
 func (r *postgresTeacherRepository) GetClassScheduleByID(ctx context.Context, id int64) (*domain.ClassSchedule, error) {
@@ -170,7 +170,7 @@ func (r *postgresTeacherRepository) GetClassScheduleByID(ctx context.Context, id
 }
 
 func (r *postgresTeacherRepository) UpdateClassSchedule(ctx context.Context, schedule *domain.ClassSchedule) error {
-	return r.db.WithContext(ctx).Omit(clause.Associations, "CreatedAt").Save(schedule).Error
+	return r.db.WithContext(ctx).Omit("Teacher", "Course", "Subject", "CreatedAt").Save(schedule).Error
 }
 
 func (r *postgresTeacherRepository) DeleteClassSchedule(ctx context.Context, id int64) error {

@@ -352,11 +352,11 @@ func (r *postgresCourseRepository) GetScheduleByID(ctx context.Context, id int64
 }
 
 func (r *postgresCourseRepository) CreateSchedule(ctx context.Context, schedule *domain.ClassSchedule) error {
-	return r.db.WithContext(ctx).Omit(clause.Associations).Create(schedule).Error
+	return r.db.WithContext(ctx).Omit("Teacher", "Course", "Subject").Create(schedule).Error
 }
 
 func (r *postgresCourseRepository) UpdateSchedule(ctx context.Context, schedule *domain.ClassSchedule) error {
-	return r.db.WithContext(ctx).Omit(clause.Associations).Save(schedule).Error
+	return r.db.WithContext(ctx).Omit("Teacher", "Course", "Subject", "CreatedAt").Save(schedule).Error
 }
 
 func (r *postgresCourseRepository) DeleteSchedule(ctx context.Context, id int64) error {
