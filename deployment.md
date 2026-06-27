@@ -632,7 +632,8 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_SSH_PORT }}
           script: |
-            cd /home/clasynq/clasynq
+            export PATH=$PATH:/usr/local/go/bin
+            cd /home/clasynq/clasynq_go
             
             # 1. Fetch remote changes to compare
             git fetch origin main
