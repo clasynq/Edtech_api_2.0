@@ -124,8 +124,8 @@ cat ~/.ssh/id_ed25519.pub
 ## STEP 7 — Clone Project And Prepare Binary Directory
 Clone your codebase and navigate to the project directory:
 ```bash
-git clone git@github.com:YOUR_USERNAME/REPO.git /home/clasynq/clasynq
-cd /home/clasynq/clasynq
+git clone git@github.com:YOUR_USERNAME/REPO.git /home/clasynq/clasynq_go
+cd /home/clasynq/clasynq_go
 
 # Create folder structure for compiled Go binaries
 mkdir -p /home/clasynq/services/bin
@@ -161,7 +161,7 @@ redis-cli ping
 ## STEP 10 — Create System Environment Variables (.Env)
 Create a single unified `.env` configuration file in the project root folder. All Go microservices will load shared database/Redis connection details and security keys from this single file via systemd:
 ```bash
-nano /home/clasynq/clasynq/.env
+nano /home/clasynq/clasynq_go/.env
 ```
 Paste and fill in the following parameters:
 ```env
@@ -209,7 +209,7 @@ MEDIA_ROOT=/home/clasynq/Medias/
 ## STEP 11 — Build The Go Microservices
 Navigate to the root workspace folder (where `go.work` resides) and download dependencies, then compile all 10 microservices:
 ```bash
-cd /home/clasynq/clasynq
+cd /home/clasynq/clasynq_go
 go mod download
 
 # Build auth
@@ -251,8 +251,8 @@ After=network.target redis-server.service postgresql.service pgbouncer.service
 [Service]
 User=clasynq
 Group=www-data
-WorkingDirectory=/home/clasynq/clasynq
-EnvironmentFile=/home/clasynq/clasynq/.env
+WorkingDirectory=/home/clasynq/clasynq_go
+EnvironmentFile=/home/clasynq/clasynq_go/.env
 Environment="PORT=8081"
 ExecStart=/home/clasynq/services/bin/auth-service
 Restart=always
@@ -722,7 +722,7 @@ To ensure enrollments are processed successfully, configure a webhook:
    - **Active Events**: `order.paid` and `payment.captured`.
 
 ##### C. Update VPS Environment Variables
-Update `/home/clasynq/clasynq/.env` with your live credentials:
+Update `/home/clasynq/clasynq_go/.env` with your live credentials:
 ```env
 RAZORPAY_KEY_ID=rzp_live_YOUR_LIVE_KEY_ID
 RAZORPAY_KEY_SECRET=YOUR_LIVE_KEY_SECRET
