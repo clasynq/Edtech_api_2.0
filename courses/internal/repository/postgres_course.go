@@ -12,7 +12,6 @@ import (
 	"clasynq/api/courses/internal/domain"
 
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 type postgresCourseRepository struct {
