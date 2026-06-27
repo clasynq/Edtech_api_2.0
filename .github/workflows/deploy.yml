@@ -17,6 +17,7 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_SSH_PORT }}
           script: |
+            export PATH=$PATH:/usr/local/go/bin
             cd /home/clasynq/clasynq
             
             # 1. Fetch remote changes to compare
