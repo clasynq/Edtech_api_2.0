@@ -703,15 +703,26 @@ func (u *teacherUsecase) invalidateCache(ctx context.Context, teacherID int64) {
 	if u.rdb == nil {
 		return
 	}
-	keys := []string{
-		fmt.Sprintf("teacher_overview_%d", teacherID),
-		fmt.Sprintf("teacher_batches_%d", teacherID),
-		fmt.Sprintf("teacher_classes_%d", teacherID),
+	patterns := []string{
+		fmt.Sprintf("teacher_overview_%d*", teacherID),
+		fmt.Sprintf("teacher_batches_%d*", teacherID),
+		fmt.Sprintf("teacher_classes_%d*", teacherID),
 	}
-	for _, k := range keys {
-		u.rdb.Del(ctx, k)
-		u.rdb.Del(ctx, k+"_cat_CSE(Graduation)")
-		u.rdb.Del(ctx, k+"_cat_11/12(WB Board)")
+	for _, pattern := range patterns {
+		var cursor uint64
+		for {
+			keys, nextCursor, err := u.rdb.Scan(ctx, cursor, pattern, 100).Result()
+			if err != nil {
+				break
+			}
+			if len(keys) > 0 {
+				u.rdb.Del(ctx, keys...)
+			}
+			cursor = nextCursor
+			if cursor == 0 {
+				break
+			}
+		}
 	}
 }
 
