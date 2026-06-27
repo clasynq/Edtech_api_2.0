@@ -73,7 +73,7 @@ func main() {
 
 	// 5. Initialize Layers
 	repo := repository.NewPostgresTestSeriesRepository(db)
-	uc := usecase.NewTestSeriesUsecase(repo)
+	uc := usecase.NewTestSeriesUsecase(repo, rdb)
 	authMiddleware := delivery.AuthMiddleware(cfg.SecretKey, rdb)
 	optionalAuthMiddleware := delivery.OptionalAuthMiddleware(cfg.SecretKey)
 

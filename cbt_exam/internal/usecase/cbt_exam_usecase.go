@@ -3,7 +3,9 @@ package usecase
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"math/big"
 	"sort"
@@ -12,14 +14,19 @@ import (
 	"time"
 
 	"clasynq/api/cbt_exam/internal/domain"
+	"github.com/redis/go-redis/v9"
 )
 
 type cbtExamUsecase struct {
 	repo domain.CbtExamRepository
+	rdb  *redis.Client
 }
 
-func NewCbtExamUsecase(repo domain.CbtExamRepository) domain.CbtExamUsecase {
-	return &cbtExamUsecase{repo: repo}
+func NewCbtExamUsecase(repo domain.CbtExamRepository, rdb *redis.Client) domain.CbtExamUsecase {
+	return &cbtExamUsecase{
+		repo: repo,
+		rdb:  rdb,
+	}
 }
 
 func (u *cbtExamUsecase) StartAttempt(ctx context.Context, userID int64, testIDOrSlug string) (*domain.StudentTestAttempt, []domain.Question, error) {
@@ -90,9 +97,29 @@ func (u *cbtExamUsecase) StartAttempt(ctx context.Context, userID int64, testIDO
 	}
 
 	// 4. Load questions
-	questions, err := u.repo.GetQuestionsByTestID(ctx, test.ID)
-	if err != nil {
-		return nil, nil, err
+	var questions []domain.Question
+	cacheKey := fmt.Sprintf("cbt_questions:test_id:%d", test.ID)
+	cacheHit := false
+
+	if u.rdb != nil {
+		if val, err := u.rdb.Get(ctx, cacheKey).Result(); err == nil {
+			if err := json.Unmarshal([]byte(val), &questions); err == nil {
+				cacheHit = true
+			}
+		}
+	}
+
+	if !cacheHit {
+		var err error
+		questions, err = u.repo.GetQuestionsByTestID(ctx, test.ID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if u.rdb != nil {
+			if raw, err := json.Marshal(questions); err == nil {
+				_ = u.rdb.Set(ctx, cacheKey, string(raw), 10*time.Minute).Err()
+			}
+		}
 	}
 
 	// 5. SECURE: Hide correct answers and explanations during ongoing exam
@@ -318,6 +345,12 @@ func (u *cbtExamUsecase) SubmitTest(ctx context.Context, userID int64, attemptSl
 				_ = u.repo.UpdateTestResult(bgCtx, &results[i])
 			}
 		}
+
+		if u.rdb != nil {
+			u.rdb.Del(bgCtx, fmt.Sprintf("cbt_leaderboard:%d", test.ID))
+			u.rdb.Del(bgCtx, fmt.Sprintf("cbt_leaderboard:%s", test.Slug))
+			u.rdb.Del(bgCtx, fmt.Sprintf("cbt_leaderboard:id:%d", test.ID))
+		}
 	}()
 
 	return res, nil
@@ -342,6 +375,16 @@ func (u *cbtExamUsecase) GetAttemptResult(ctx context.Context, userID int64, att
 	}
 	if student == nil || attempt.StudentID != student.ID {
 		return nil, errors.New("unauthorized attempt access")
+	}
+
+	cacheKey := fmt.Sprintf("cbt_attempt_result:%s", attemptSlug)
+	if u.rdb != nil {
+		if val, err := u.rdb.Get(ctx, cacheKey).Result(); err == nil {
+			var cached map[string]interface{}
+			if err := json.Unmarshal([]byte(val), &cached); err == nil {
+				return cached, nil
+			}
+		}
 	}
 
 	result, err := u.repo.GetTestResultByAttemptID(ctx, attempt.ID)
@@ -466,16 +509,34 @@ func (u *cbtExamUsecase) GetAttemptResult(ctx context.Context, userID int64, att
 		totalMarks = test.TotalMarks
 	}
 
-	return map[string]interface{}{
+	payload := map[string]interface{}{
 		"testTitle":         testTitle,
 		"totalMarks":        totalMarks,
 		"result":            resultMap,
 		"reviews":           reviews,
 		"totalParticipants": totalParticipants,
-	}, nil
+	}
+
+	if u.rdb != nil {
+		if raw, err := json.Marshal(payload); err == nil {
+			_ = u.rdb.Set(ctx, cacheKey, string(raw), 30*time.Minute).Err()
+		}
+	}
+
+	return payload, nil
 }
 
 func (u *cbtExamUsecase) GetLeaderboard(ctx context.Context, testIDOrSlug string) ([]map[string]interface{}, error) {
+	cacheKey := fmt.Sprintf("cbt_leaderboard:%s", testIDOrSlug)
+	if u.rdb != nil {
+		if val, err := u.rdb.Get(ctx, cacheKey).Result(); err == nil {
+			var cached []map[string]interface{}
+			if err := json.Unmarshal([]byte(val), &cached); err == nil {
+				return cached, nil
+			}
+		}
+	}
+
 	test, err := u.repo.GetTestByIDOrSlug(ctx, testIDOrSlug)
 	if err != nil {
 		return nil, err
@@ -484,7 +545,20 @@ func (u *cbtExamUsecase) GetLeaderboard(ctx context.Context, testIDOrSlug string
 		return nil, errors.New("test not found")
 	}
 
-	return u.repo.GetLeaderboard(ctx, test.ID)
+	leaderboard, err := u.repo.GetLeaderboard(ctx, test.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	if u.rdb != nil {
+		if raw, err := json.Marshal(leaderboard); err == nil {
+			_ = u.rdb.Set(ctx, cacheKey, string(raw), 5*time.Minute).Err()
+			cacheKeyID := fmt.Sprintf("cbt_leaderboard:id:%d", test.ID)
+			_ = u.rdb.Set(ctx, cacheKeyID, string(raw), 5*time.Minute).Err()
+		}
+	}
+
+	return leaderboard, nil
 }
 
 func (u *cbtExamUsecase) HasAccess(ctx context.Context, userID int64, role string, seriesID int64) (bool, error) {

@@ -3,32 +3,73 @@ package usecase
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"clasynq/api/notes/internal/domain"
+	"github.com/redis/go-redis/v9"
 )
 
 type noteUsecase struct {
 	repo    domain.NoteRepository
 	baseURL string
+	rdb     *redis.Client
 }
 
-func NewNoteUsecase(repo domain.NoteRepository, baseURL string) domain.NoteUsecase {
+func NewNoteUsecase(repo domain.NoteRepository, baseURL string, rdb *redis.Client) domain.NoteUsecase {
 	return &noteUsecase{
 		repo:    repo,
 		baseURL: baseURL,
+		rdb:     rdb,
 	}
 }
 
+func serializeFilters(filters map[string]string) string {
+	keys := make([]string, 0, len(filters))
+	for k := range filters {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var parts []string
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%s", k, filters[k]))
+	}
+	return strings.Join(parts, "&")
+}
+
 func (u *noteUsecase) GetNotes(ctx context.Context, userID int64, role string, filters map[string]string) ([]domain.Note, error) {
-	notes, err := u.repo.GetNotes(ctx, filters)
-	if err != nil {
-		return nil, err
+	serialized := serializeFilters(filters)
+	cacheKey := fmt.Sprintf("notes_list:filters:%s", serialized)
+
+	var notes []domain.Note
+	cacheHit := false
+
+	if u.rdb != nil {
+		if val, err := u.rdb.Get(ctx, cacheKey).Result(); err == nil {
+			if err := json.Unmarshal([]byte(val), &notes); err == nil {
+				cacheHit = true
+			}
+		}
+	}
+
+	if !cacheHit {
+		var err error
+		notes, err = u.repo.GetNotes(ctx, filters)
+		if err != nil {
+			return nil, err
+		}
+
+		if u.rdb != nil {
+			if raw, err := json.Marshal(notes); err == nil {
+				_ = u.rdb.Set(ctx, cacheKey, string(raw), 10*time.Minute).Err()
+			}
+		}
 	}
 
 	// Determine access for each note and mask URL if no access
@@ -85,12 +126,35 @@ func (u *noteUsecase) GetClassNotes(ctx context.Context, userID int64, role stri
 }
 
 func (u *noteUsecase) GetNoteByIDOrSlug(ctx context.Context, userID int64, role string, idOrSlug string) (*domain.Note, bool, error) {
-	note, err := u.repo.GetNoteByIDOrSlug(ctx, idOrSlug)
-	if err != nil {
-		return nil, false, err
+	cacheKey := fmt.Sprintf("note_detail:%s", idOrSlug)
+	var note *domain.Note
+	cacheHit := false
+
+	if u.rdb != nil {
+		if val, err := u.rdb.Get(ctx, cacheKey).Result(); err == nil {
+			var cachedNote domain.Note
+			if err := json.Unmarshal([]byte(val), &cachedNote); err == nil {
+				note = &cachedNote
+				cacheHit = true
+			}
+		}
 	}
-	if note == nil {
-		return nil, false, nil
+
+	if !cacheHit {
+		var err error
+		note, err = u.repo.GetNoteByIDOrSlug(ctx, idOrSlug)
+		if err != nil {
+			return nil, false, err
+		}
+		if note == nil {
+			return nil, false, nil
+		}
+
+		if u.rdb != nil {
+			if raw, err := json.Marshal(note); err == nil {
+				_ = u.rdb.Set(ctx, cacheKey, string(raw), 10*time.Minute).Err()
+			}
+		}
 	}
 
 	hasAccess, err := u.checkAccess(ctx, userID, role, note)
@@ -130,7 +194,11 @@ func (u *noteUsecase) CreateNote(ctx context.Context, note *domain.Note) error {
 	}
 
 	note.CreatedAt = time.Now()
-	return u.repo.CreateNote(ctx, note)
+	if err := u.repo.CreateNote(ctx, note); err != nil {
+		return err
+	}
+	u.invalidateNotesCache(ctx)
+	return nil
 }
 
 func (u *noteUsecase) UpdateNote(ctx context.Context, idOrSlug string, updates map[string]interface{}) (*domain.Note, error) {
@@ -210,9 +278,9 @@ func (u *noteUsecase) UpdateNote(ctx context.Context, idOrSlug string, updates m
 	if err := u.repo.UpdateNote(ctx, note); err != nil {
 		return nil, err
 	}
+	u.invalidateNotesCache(ctx)
 	return note, nil
 }
-
 func (u *noteUsecase) DeleteNote(ctx context.Context, idOrSlug string) error {
 	note, err := u.repo.GetNoteByIDOrSlug(ctx, idOrSlug)
 	if err != nil {
@@ -221,9 +289,12 @@ func (u *noteUsecase) DeleteNote(ctx context.Context, idOrSlug string) error {
 	if note == nil {
 		return errors.New("note not found")
 	}
-	return u.repo.DeleteNote(ctx, note.ID)
+	if err := u.repo.DeleteNote(ctx, note.ID); err != nil {
+		return err
+	}
+	u.invalidateNotesCache(ctx)
+	return nil
 }
-
 func (u *noteUsecase) HasAccess(ctx context.Context, userID int64, role string, noteIDOrSlug string) (bool, error) {
 	note, err := u.repo.GetNoteByIDOrSlug(ctx, noteIDOrSlug)
 	if err != nil {
@@ -316,4 +387,20 @@ func (u *noteUsecase) populateSVGPageURLs(note *domain.Note) {
 		urls[i-1] = fmt.Sprintf("%s/media/notes/note_%d_pages/page_%d.svg", u.baseURL, note.ID, i)
 	}
 	note.SVGPageURLs = urls
+}
+
+func (u *noteUsecase) invalidateCache(ctx context.Context, patterns ...string) {
+	if u.rdb == nil {
+		return
+	}
+	for _, pattern := range patterns {
+		iter := u.rdb.Scan(ctx, 0, pattern, 0).Iterator()
+		for iter.Next(ctx) {
+			u.rdb.Del(ctx, iter.Val())
+		}
+	}
+}
+
+func (u *noteUsecase) invalidateNotesCache(ctx context.Context) {
+	u.invalidateCache(ctx, "notes_list*", "class_notes_list*", "note_detail*")
 }

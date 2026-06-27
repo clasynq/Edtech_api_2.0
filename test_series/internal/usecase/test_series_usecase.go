@@ -3,39 +3,106 @@ package usecase
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"clasynq/api/test_series/internal/domain"
+	"github.com/redis/go-redis/v9"
 )
 
 type testSeriesUsecase struct {
 	repo domain.TestSeriesRepository
+	rdb  *redis.Client
 }
 
-func NewTestSeriesUsecase(repo domain.TestSeriesRepository) domain.TestSeriesUsecase {
-	return &testSeriesUsecase{repo: repo}
+func NewTestSeriesUsecase(repo domain.TestSeriesRepository, rdb *redis.Client) domain.TestSeriesUsecase {
+	return &testSeriesUsecase{
+		repo: repo,
+		rdb:  rdb,
+	}
+}
+
+func serializeFilters(filters map[string]string) string {
+	keys := make([]string, 0, len(filters))
+	for k := range filters {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var parts []string
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%s", k, filters[k]))
+	}
+	return strings.Join(parts, "&")
 }
 
 func (u *testSeriesUsecase) GetTestSeries(ctx context.Context, userID int64, role string, filters map[string]string) ([]domain.TestSeries, error) {
-	list, err := u.repo.GetTestSeries(ctx, filters)
-	if err != nil {
-		return nil, err
+	serialized := serializeFilters(filters)
+	cacheKey := fmt.Sprintf("test_series_list:filters:%s", serialized)
+
+	var list []domain.TestSeries
+	cacheHit := false
+
+	if u.rdb != nil {
+		if val, err := u.rdb.Get(ctx, cacheKey).Result(); err == nil {
+			if err := json.Unmarshal([]byte(val), &list); err == nil {
+				cacheHit = true
+			}
+		}
 	}
+
+	if !cacheHit {
+		var err error
+		list, err = u.repo.GetTestSeries(ctx, filters)
+		if err != nil {
+			return nil, err
+		}
+
+		if u.rdb != nil {
+			if raw, err := json.Marshal(list); err == nil {
+				_ = u.rdb.Set(ctx, cacheKey, string(raw), 10*time.Minute).Err()
+			}
+		}
+	}
+
 	return u.populateTestSeriesVirtualFields(ctx, userID, role, list)
 }
 
 func (u *testSeriesUsecase) GetTestSeriesByIDOrSlug(ctx context.Context, userID int64, role string, idOrSlug string) (*domain.TestSeries, bool, error) {
-	ts, err := u.repo.GetTestSeriesByIDOrSlug(ctx, idOrSlug)
-	if err != nil {
-		return nil, false, err
+	cacheKey := fmt.Sprintf("test_series_detail:%s", idOrSlug)
+	var ts *domain.TestSeries
+	cacheHit := false
+
+	if u.rdb != nil {
+		if val, err := u.rdb.Get(ctx, cacheKey).Result(); err == nil {
+			var cached domain.TestSeries
+			if err := json.Unmarshal([]byte(val), &cached); err == nil {
+				ts = &cached
+				cacheHit = true
+			}
+		}
 	}
-	if ts == nil {
-		return nil, false, nil
+
+	if !cacheHit {
+		var err error
+		ts, err = u.repo.GetTestSeriesByIDOrSlug(ctx, idOrSlug)
+		if err != nil {
+			return nil, false, err
+		}
+		if ts == nil {
+			return nil, false, nil
+		}
+
+		if u.rdb != nil {
+			if raw, err := json.Marshal(ts); err == nil {
+				_ = u.rdb.Set(ctx, cacheKey, string(raw), 10*time.Minute).Err()
+			}
+		}
 	}
 
 	hasAccess, err := u.HasAccess(ctx, userID, role, ts.ID)
@@ -124,7 +191,11 @@ func (u *testSeriesUsecase) CreateTestSeries(ctx context.Context, ts *domain.Tes
 	}
 
 	ts.CreatedAt = time.Now()
-	return u.repo.CreateTestSeries(ctx, ts)
+	if err := u.repo.CreateTestSeries(ctx, ts); err != nil {
+		return err
+	}
+	u.invalidateTestSeriesCache(ctx)
+	return nil
 }
 
 func (u *testSeriesUsecase) GetTestByIDOrSlug(ctx context.Context, idOrSlug string) (*domain.Test, error) {
@@ -459,10 +530,34 @@ func (u *testSeriesUsecase) GetQuestionsByTestID(ctx context.Context, testID int
 }
 
 func (u *testSeriesUsecase) UpdateTestSeries(ctx context.Context, id int64, ts *domain.TestSeries) error {
-	return u.repo.UpdateTestSeries(ctx, id, ts)
+	if err := u.repo.UpdateTestSeries(ctx, id, ts); err != nil {
+		return err
+	}
+	u.invalidateTestSeriesCache(ctx)
+	return nil
 }
 
 func (u *testSeriesUsecase) DeleteTestSeries(ctx context.Context, id int64) error {
-	return u.repo.DeleteTestSeries(ctx, id)
+	if err := u.repo.DeleteTestSeries(ctx, id); err != nil {
+		return err
+	}
+	u.invalidateTestSeriesCache(ctx)
+	return nil
+}
+
+func (u *testSeriesUsecase) invalidateCache(ctx context.Context, patterns ...string) {
+	if u.rdb == nil {
+		return
+	}
+	for _, pattern := range patterns {
+		iter := u.rdb.Scan(ctx, 0, pattern, 0).Iterator()
+		for iter.Next(ctx) {
+			u.rdb.Del(ctx, iter.Val())
+		}
+	}
+}
+
+func (u *testSeriesUsecase) invalidateTestSeriesCache(ctx context.Context) {
+	u.invalidateCache(ctx, "test_series_list*", "test_series_detail*")
 }
 

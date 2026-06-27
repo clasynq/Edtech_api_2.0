@@ -737,7 +737,7 @@ func (u *adminUsecase) CreateCategory(ctx context.Context, name string) (*domain
 		return nil, err
 	}
 	// Invalidate cache
-	u.rdb.Del(ctx, "homepage_platform_stats")
+	u.rdb.Del(ctx, "homepage_platform_stats", "platform_categories")
 	return category, nil
 }
 
@@ -761,7 +761,7 @@ func (u *adminUsecase) UpdateCategory(ctx context.Context, id int64, name string
 	_ = u.repo.CascadeCategoryUpdate(ctx, oldName, name)
 
 	// Invalidate caches
-	u.rdb.Del(ctx, "homepage_platform_stats")
+	u.rdb.Del(ctx, "homepage_platform_stats", "platform_categories")
 	return category, nil
 }
 
@@ -782,7 +782,7 @@ func (u *adminUsecase) DeleteCategory(ctx context.Context, id int64) error {
 	_ = u.repo.CascadeCategoryDelete(ctx, category.Name)
 
 	// Invalidate cache
-	u.rdb.Del(ctx, "homepage_platform_stats")
+	u.rdb.Del(ctx, "homepage_platform_stats", "platform_categories")
 	return nil
 }
 
@@ -840,6 +840,16 @@ func (u *adminUsecase) GetPlatformStats(ctx context.Context) (map[string]interfa
 }
 
 func (u *adminUsecase) GetPlatformCategories(ctx context.Context) ([]string, error) {
+	cacheKey := "platform_categories"
+	if u.rdb != nil {
+		if val, err := u.rdb.Get(ctx, cacheKey).Result(); err == nil {
+			var cached []string
+			if err := json.Unmarshal([]byte(val), &cached); err == nil {
+				return cached, nil
+			}
+		}
+	}
+
 	list, err := u.repo.ListCategories(ctx)
 	if err != nil {
 		return nil, err
@@ -849,8 +859,15 @@ func (u *adminUsecase) GetPlatformCategories(ctx context.Context) ([]string, err
 		cats[i] = c.Name
 	}
 	if len(cats) == 0 {
-		return []string{"CSE(Graduation)", "11/12(WB Board)"}, nil
+		cats = []string{"CSE(Graduation)", "11/12(WB Board)"}
 	}
+
+	if u.rdb != nil {
+		if raw, err := json.Marshal(cats); err == nil {
+			_ = u.rdb.Set(ctx, cacheKey, string(raw), 10*time.Minute).Err()
+		}
+	}
+
 	return cats, nil
 }
 

@@ -73,7 +73,7 @@ func main() {
 
 	// 5. Initialize Layers
 	repo := repository.NewPostgresCbtExamRepository(db)
-	uc := usecase.NewCbtExamUsecase(repo)
+	uc := usecase.NewCbtExamUsecase(repo, rdb)
 	authMiddleware := delivery.AuthMiddleware(cfg.SecretKey, rdb)
 	optionalAuthMiddleware := delivery.OptionalAuthMiddleware(cfg.SecretKey)
 
