@@ -307,30 +307,38 @@ func (u *userUsecase) Login(ctx context.Context, emailOrUsername, password, remo
 		}
 	}
 
-	// 2. Try resolving as Admin or Teacher
 	if strings.Contains(emailOrUsername, "@") {
 		// Admin
 		adminUser, err := u.repo.GetAdminByEmail(ctx, emailOrUsername)
 		if err == nil && adminUser != nil {
 			ok, err := utils.VerifyDjangoPassword(password, adminUser.Password)
 			if err == nil && ok {
-				tokens, err := utils.GenerateTokenPair(
-					ctx, u.rdb, "admin", adminUser.ID, "admin", "", u.cfg.SecretKey, 18000, 31536000,
+				otpCode := generateNumericCode(6)
+				otpKey := fmt.Sprintf("login_otp:%s", adminUser.Email)
+				if u.rdb != nil {
+					_ = u.rdb.Set(ctx, otpKey, otpCode, 5*time.Minute).Err()
+				}
+
+				err = utils.SendOTPEmail(
+					adminUser.Email,
+					otpCode,
+					strings.Title(strings.Replace(strings.Split(adminUser.Email, "@")[0], ".", " ", -1)),
+					"2fa",
+					u.cfg.DefaultFromEmail,
+					u.cfg.EmailHost,
+					u.cfg.EmailPort,
+					u.cfg.EmailHostUser,
+					u.cfg.EmailHostPassword,
+					300,
 				)
 				if err != nil {
-					return nil, err
+					return map[string]interface{}{"code": "email_send_failed", "message": "Failed to send verification email. " + err.Error()}, nil
 				}
 
 				return map[string]interface{}{
-					"user": map[string]interface{}{
-						"id":        adminUser.ID,
-						"email":     adminUser.Email,
-						"role":      "admin",
-						"fullName":  strings.Title(strings.Replace(strings.Split(adminUser.Email, "@")[0], ".", " ", -1)),
-						"createdAt": adminUser.CreatedAt,
-					},
-					"access_token":  tokens["access_token"],
-					"refresh_token": tokens["refresh_token"],
+					"require_2fa": true,
+					"email":       adminUser.Email,
+					"role":        "admin",
 				}, nil
 			}
 		}
@@ -340,31 +348,114 @@ func (u *userUsecase) Login(ctx context.Context, emailOrUsername, password, remo
 		if err == nil && teacherUser != nil {
 			ok, err := utils.VerifyDjangoPassword(password, teacherUser.Password)
 			if err == nil && ok {
-				tokens, err := utils.GenerateTokenPair(
-					ctx, u.rdb, "teacher", teacherUser.ID, "teacher", "", u.cfg.SecretKey, 18000, 31536000,
+				otpCode := generateNumericCode(6)
+				otpKey := fmt.Sprintf("login_otp:%s", teacherUser.Email)
+				if u.rdb != nil {
+					_ = u.rdb.Set(ctx, otpKey, otpCode, 5*time.Minute).Err()
+				}
+
+				err = utils.SendOTPEmail(
+					teacherUser.Email,
+					otpCode,
+					teacherUser.Name,
+					"2fa",
+					u.cfg.DefaultFromEmail,
+					u.cfg.EmailHost,
+					u.cfg.EmailPort,
+					u.cfg.EmailHostUser,
+					u.cfg.EmailHostPassword,
+					300,
 				)
 				if err != nil {
-					return nil, err
+					return map[string]interface{}{"code": "email_send_failed", "message": "Failed to send verification email. " + err.Error()}, nil
 				}
 
 				return map[string]interface{}{
-					"user": map[string]interface{}{
-						"id":             teacherUser.ID,
-						"email":          teacherUser.Email,
-						"role":           "teacher",
-						"fullName":       teacherUser.Name,
-						"specialization": teacherUser.Specialization,
-						"photoUrl":       teacherUser.PhotoURL,
-						"createdAt":      teacherUser.CreatedAt,
-					},
-					"access_token":  tokens["access_token"],
-					"refresh_token": tokens["refresh_token"],
+					"require_2fa": true,
+					"email":       teacherUser.Email,
+					"role":        "teacher",
 				}, nil
 			}
 		}
 	}
 
 	return nil, errors.New("Authentication failed. Invalid email or password.")
+}
+
+func (u *userUsecase) VerifyLogin2FA(ctx context.Context, email, code, role string) (map[string]interface{}, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	otpKey := fmt.Sprintf("login_otp:%s", email)
+
+	if u.rdb == nil {
+		return nil, errors.New("temporary issue: Redis connection unavailable")
+	}
+
+	val, err := u.rdb.Get(ctx, otpKey).Result()
+	if err != nil {
+		return nil, errors.New("verification code has expired or is invalid. Please request a new one.")
+	}
+
+	if val != code {
+		return nil, errors.New("invalid verification code.")
+	}
+
+	// Code matched! Delete OTP
+	u.rdb.Del(ctx, otpKey)
+
+	// Generate token pair and profile based on role
+	if role == "admin" {
+		adminUser, err := u.repo.GetAdminByEmail(ctx, email)
+		if err != nil || adminUser == nil {
+			return nil, errors.New("admin account not found")
+		}
+
+		tokens, err := utils.GenerateTokenPair(
+			ctx, u.rdb, "admin", adminUser.ID, "admin", "", u.cfg.SecretKey, 18000, 31536000,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		return map[string]interface{}{
+			"user": map[string]interface{}{
+				"id":        adminUser.ID,
+				"email":     adminUser.Email,
+				"role":      "admin",
+				"fullName":  strings.Title(strings.Replace(strings.Split(adminUser.Email, "@")[0], ".", " ", -1)),
+				"createdAt": adminUser.CreatedAt,
+			},
+			"access_token":  tokens["access_token"],
+			"refresh_token": tokens["refresh_token"],
+		}, nil
+	} else if role == "teacher" {
+		teacherUser, err := u.repo.GetTeacherByEmail(ctx, email)
+		if err != nil || teacherUser == nil {
+			return nil, errors.New("teacher account not found")
+		}
+
+		tokens, err := utils.GenerateTokenPair(
+			ctx, u.rdb, "teacher", teacherUser.ID, "teacher", "", u.cfg.SecretKey, 18000, 31536000,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		return map[string]interface{}{
+			"user": map[string]interface{}{
+				"id":             teacherUser.ID,
+				"email":          teacherUser.Email,
+				"role":           "teacher",
+				"fullName":       teacherUser.Name,
+				"specialization": teacherUser.Specialization,
+				"photoUrl":       teacherUser.PhotoURL,
+				"createdAt":      teacherUser.CreatedAt,
+			},
+			"access_token":  tokens["access_token"],
+			"refresh_token": tokens["refresh_token"],
+		}, nil
+	}
+
+	return nil, errors.New("invalid role")
 }
 
 func (u *userUsecase) ForgotPassword(ctx context.Context, email string) (map[string]interface{}, error) {

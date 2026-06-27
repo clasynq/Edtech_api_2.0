@@ -35,6 +35,7 @@ func (h *HttpHandler) RegisterRoutes(r *gin.Engine, authMiddleware gin.HandlerFu
 			auth.POST("/verify-otp", h.VerifyOTP)
 			auth.POST("/resend-otp", h.ResendOTP)
 			auth.POST("/login", h.Login)
+			auth.POST("/verify-login-2fa", h.VerifyLogin2FA)
 			auth.POST("/logout", authMiddleware, h.Logout)
 			auth.POST("/refresh", h.Refresh)
 			auth.POST("/forgot-password", h.ForgotPassword)
@@ -147,6 +148,28 @@ func (h *HttpHandler) VerifyOTP(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, res)
+}
+
+type verifyLogin2FAReq struct {
+	Email string `json:"email" binding:"required,email"`
+	Code  string `json:"code" binding:"required"`
+	Role  string `json:"role" binding:"required"`
+}
+
+func (h *HttpHandler) VerifyLogin2FA(c *gin.Context) {
+	var req verifyLogin2FAReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid input.", "detail": err.Error()})
+		return
+	}
+
+	res, err := h.usecase.VerifyLogin2FA(c.Request.Context(), req.Email, req.Code, req.Role)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, res)
 }
 
 type resendOtpReq struct {
