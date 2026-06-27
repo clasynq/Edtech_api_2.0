@@ -339,7 +339,7 @@ func (r *postgresBlogRepository) ToggleFollowUser(ctx context.Context, followerI
 
 	if count > 0 {
 		// Delete
-		err = r.db.WithContext(ctx).Table("user_follows").Where("follower_id = ? AND followed_id = ?", followerID, followedID).Delete(nil).Error
+		err = r.db.WithContext(ctx).Exec("DELETE FROM user_follows WHERE follower_id = ? AND followed_id = ?", followerID, followedID).Error
 		return false, err
 	}
 

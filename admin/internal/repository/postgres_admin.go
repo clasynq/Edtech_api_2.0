@@ -334,7 +334,11 @@ func (r *postgresAdminRepository) AssignTeacherToCourses(ctx context.Context, te
 		return nil
 	}
 	var courses []domain.Course
-	if err := r.db.WithContext(ctx).Where("course_name IN ?", courseNames).Find(&courses).Error; err != nil {
+	var lowerNames []string
+	for _, name := range courseNames {
+		lowerNames = append(lowerNames, strings.ToLower(strings.TrimSpace(name)))
+	}
+	if err := r.db.WithContext(ctx).Where("LOWER(TRIM(course_name)) IN ?", lowerNames).Find(&courses).Error; err != nil {
 		return err
 	}
 	for _, c := range courses {
@@ -369,16 +373,14 @@ func (r *postgresAdminRepository) UnassignTeacherFromOldCourses(ctx context.Cont
 		if err := r.db.WithContext(ctx).First(&course, link.CourseID).Error; err == nil {
 			inNewList := false
 			for _, cn := range courseNames {
-				if course.CourseName == cn {
+				if strings.EqualFold(strings.TrimSpace(course.CourseName), strings.TrimSpace(cn)) {
 					inNewList = true
 					break
 				}
 			}
 			if !inNewList {
-				// Delete from join table
-				r.db.WithContext(ctx).Table("courses_teachers").
-					Where("course_id = ? AND teacher_id = ?", course.ID, teacherID).
-					Delete(nil)
+				// Delete from join table using raw SQL for 100% reliability
+				r.db.WithContext(ctx).Exec("DELETE FROM courses_teachers WHERE course_id = ? AND teacher_id = ?", course.ID, teacherID)
 
 				// Update course.teacher_id if it matched
 				if course.TeacherID != nil && *course.TeacherID == teacherID {
