@@ -33,7 +33,7 @@ func (u *courseUsecase) GetCourses(ctx context.Context, role string, userID int6
 	if isFeatured != nil {
 		featuredStr = strconv.FormatBool(*isFeatured)
 	}
-	cacheKey := fmt.Sprintf("courses_list:featured:%s:search:%s:cat:%s:lim:%d", featuredStr, search, category, limit)
+	cacheKey := fmt.Sprintf("courses_list:role:%s:user:%d:featured:%s:search:%s:cat:%s:lim:%d", role, userID, featuredStr, search, category, limit)
 
 	if u.rdb != nil {
 		if val, err := u.rdb.Get(ctx, cacheKey).Result(); err == nil {
@@ -59,7 +59,7 @@ func (u *courseUsecase) GetCourses(ctx context.Context, role string, userID int6
 }
 
 func (u *courseUsecase) GetCourseByIDOrSlug(ctx context.Context, idOrSlug string, role string, userID int64) (*domain.Course, error) {
-	cacheKey := fmt.Sprintf("course_detail:%s:role:%s", idOrSlug, role)
+	cacheKey := fmt.Sprintf("course_detail:%s:role:%s:user:%d", idOrSlug, role, userID)
 
 	if u.rdb != nil {
 		if val, err := u.rdb.Get(ctx, cacheKey).Result(); err == nil {
