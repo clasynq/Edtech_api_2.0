@@ -12,14 +12,19 @@ import (
 	"time"
 
 	"clasynq/api/blog/internal/domain"
+	"github.com/redis/go-redis/v9"
 )
 
 type blogUsecase struct {
 	repo domain.BlogRepository
+	rdb  *redis.Client
 }
 
-func NewBlogUsecase(repo domain.BlogRepository) domain.BlogUsecase {
-	return &blogUsecase{repo: repo}
+func NewBlogUsecase(repo domain.BlogRepository, rdb *redis.Client) domain.BlogUsecase {
+	return &blogUsecase{
+		repo: repo,
+		rdb:  rdb,
+	}
 }
 
 // Helper to generate slug from title
@@ -53,6 +58,16 @@ func (u *blogUsecase) logActivity(ctx context.Context, userID int64, activityTyp
 }
 
 func (u *blogUsecase) GetFeed(ctx context.Context, userID int64, category string, query string, cursorStr string, tab string, limit int) (map[string]interface{}, error) {
+	cacheKey := fmt.Sprintf("blog_feed_guest:cat:%s:query:%s:cursor:%s:tab:%s:lim:%d", category, query, cursorStr, tab, limit)
+	if u.rdb != nil && userID == 0 {
+		if val, err := u.rdb.Get(ctx, cacheKey).Result(); err == nil {
+			var cached map[string]interface{}
+			if err := json.Unmarshal([]byte(val), &cached); err == nil {
+				return cached, nil
+			}
+		}
+	}
+
 	var cursorTime time.Time
 	if cursorStr != "" {
 		if t, err := time.Parse(time.RFC3339, cursorStr); err == nil {
@@ -98,11 +113,17 @@ func (u *blogUsecase) GetFeed(ctx context.Context, userID int64, category string
 	}
 
 	if len(candidates) == 0 {
-		return map[string]interface{}{
+		res := map[string]interface{}{
 			"posts":    []interface{}{},
 			"next":     nil,
 			"hasNext":  false,
-		}, nil
+		}
+		if u.rdb != nil && userID == 0 {
+			if raw, err := json.Marshal(res); err == nil {
+				_ = u.rdb.Set(ctx, cacheKey, string(raw), 5*time.Minute).Err()
+			}
+		}
+		return res, nil
 	}
 
 	// Structure candidates with metadata and compute personalization score
@@ -185,14 +206,61 @@ func (u *blogUsecase) GetFeed(ctx context.Context, userID int64, category string
 		nextCursor = &lastPostTime
 	}
 
-	return map[string]interface{}{
+	res := map[string]interface{}{
 		"posts":    finalPosts,
 		"next":     nextCursor,
 		"hasNext":  hasNext,
-	}, nil
+	}
+
+	if u.rdb != nil && userID == 0 {
+		if raw, err := json.Marshal(res); err == nil {
+			_ = u.rdb.Set(ctx, cacheKey, string(raw), 5*time.Minute).Err()
+		}
+	}
+
+	return res, nil
 }
 
 func (u *blogUsecase) GetPostDetail(ctx context.Context, userID int64, slug string, viewerIP string) (map[string]interface{}, error) {
+	cacheKey := fmt.Sprintf("blog_post_detail_guest:%s", slug)
+	if u.rdb != nil && userID == 0 {
+		if val, err := u.rdb.Get(ctx, cacheKey).Result(); err == nil {
+			var cached map[string]interface{}
+			if err := json.Unmarshal([]byte(val), &cached); err == nil {
+				// Safely extract post ID from cached payload
+				var postID int64
+				if postMap, ok := cached["post"].(map[string]interface{}); ok {
+					if idVal, ok := postMap["id"]; ok {
+						switch v := idVal.(type) {
+						case float64:
+							postID = int64(v)
+						case int64:
+							postID = v
+						}
+					}
+				}
+
+				if postID > 0 {
+					// Asynchronously increment views and record view log to prevent blocking request
+					go func(pID int64, ip string) {
+						bgCtx := context.Background()
+						fields := map[string]interface{}{"views_count": 1}
+						_ = u.repo.IncrementPostCounters(bgCtx, pID, fields, 0.1)
+
+						viewLog := &domain.PostView{
+							PostID:           pID,
+							ViewerIdentifier: ip,
+							ViewedAt:         time.Now(),
+						}
+						_ = u.repo.RecordView(bgCtx, viewLog)
+					}(postID, viewerIP)
+				}
+
+				return cached, nil
+			}
+		}
+	}
+
 	post, err := u.repo.GetPostBySlug(ctx, slug)
 	if err != nil {
 		return nil, err
@@ -233,10 +301,18 @@ func (u *blogUsecase) GetPostDetail(ctx context.Context, userID int64, slug stri
 	// Refresh views count locally to reflect in current payload
 	post.ViewsCount++
 
-	return map[string]interface{}{
+	res := map[string]interface{}{
 		"post":     post,
 		"comments": comments,
-	}, nil
+	}
+
+	if u.rdb != nil && userID == 0 {
+		if raw, err := json.Marshal(res); err == nil {
+			_ = u.rdb.Set(ctx, cacheKey, string(raw), 10*time.Minute).Err()
+		}
+	}
+
+	return res, nil
 }
 
 func (u *blogUsecase) CreatePost(ctx context.Context, userID int64, title, excerpt, content, category, bannerURL, exploreLink, imageURL, videoURL string) (map[string]interface{}, error) {
@@ -280,6 +356,7 @@ func (u *blogUsecase) CreatePost(ctx context.Context, userID int64, title, excer
 	msg := fmt.Sprintf("Published a new article: %s", title)
 	u.logActivity(ctx, userID, "post", msg, "/blog/"+slug, excerpt)
 
+	u.invalidateBlogCache(ctx, "")
 	return map[string]interface{}{
 		"post": createdPost,
 	}, nil
@@ -353,6 +430,7 @@ func (u *blogUsecase) UpdatePost(ctx context.Context, userID int64, slug string,
 		return nil, err
 	}
 
+	u.invalidateBlogCache(ctx, slug)
 	return map[string]interface{}{
 		"post": post,
 	}, nil
@@ -379,6 +457,7 @@ func (u *blogUsecase) DeletePost(ctx context.Context, userID int64, slug string)
 	msg := fmt.Sprintf("Deleted the article: %s", post.Title)
 	u.logActivity(ctx, userID, "post_delete", msg, "", "")
 
+	u.invalidateBlogCache(ctx, slug)
 	return nil
 }
 
@@ -523,6 +602,7 @@ func (u *blogUsecase) AddComment(ctx context.Context, userID, postID int64, cont
 	msg := fmt.Sprintf("Commented on article: %s", post.Title)
 	u.logActivity(ctx, userID, "comment", msg, "/blog/"+post.Slug, content)
 
+	u.invalidateBlogCache(ctx, post.Slug)
 	return map[string]interface{}{
 		"comment": createdComment,
 	}, nil
@@ -530,7 +610,11 @@ func (u *blogUsecase) AddComment(ctx context.Context, userID, postID int64, cont
 
 func (u *blogUsecase) DeleteComment(ctx context.Context, userID, commentID int64) error {
 	// GORM deletion will enforce authorID ownership matching
-	return u.repo.DeleteComment(ctx, commentID, userID)
+	err := u.repo.DeleteComment(ctx, commentID, userID)
+	if err == nil {
+		u.invalidateBlogCache(ctx, "")
+	}
+	return err
 }
 
 func (u *blogUsecase) GetCommentsForPost(ctx context.Context, postID int64) ([]domain.BlogComment, error) {
@@ -810,4 +894,28 @@ func (u *blogUsecase) ToggleFollowUser(ctx context.Context, followerID, followed
 	}
 
 	return isFollowing, nil
+}
+
+func (u *blogUsecase) invalidateCache(ctx context.Context, patterns ...string) {
+	if u.rdb == nil {
+		return
+	}
+	for _, pattern := range patterns {
+		iter := u.rdb.Scan(ctx, 0, pattern, 0).Iterator()
+		for iter.Next(ctx) {
+			u.rdb.Del(ctx, iter.Val())
+		}
+	}
+}
+
+func (u *blogUsecase) invalidateBlogCache(ctx context.Context, slug string) {
+	patterns := []string{
+		"blog_feed_guest*",
+	}
+	if slug != "" {
+		patterns = append(patterns, fmt.Sprintf("blog_post_detail_guest:%s", slug))
+	} else {
+		patterns = append(patterns, "blog_post_detail_guest*")
+	}
+	u.invalidateCache(ctx, patterns...)
 }

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"math/big"
 	"strconv"
@@ -28,11 +29,62 @@ func NewCourseUsecase(repo domain.CourseRepository, rdb *redis.Client) domain.Co
 }
 
 func (u *courseUsecase) GetCourses(ctx context.Context, role string, userID int64, isFeatured *bool, search string, category string, limit int) ([]domain.Course, error) {
-	return u.repo.GetCourses(ctx, role, userID, isFeatured, search, category, limit)
+	featuredStr := "nil"
+	if isFeatured != nil {
+		featuredStr = strconv.FormatBool(*isFeatured)
+	}
+	cacheKey := fmt.Sprintf("courses_list:featured:%s:search:%s:cat:%s:lim:%d", featuredStr, search, category, limit)
+
+	if u.rdb != nil {
+		if val, err := u.rdb.Get(ctx, cacheKey).Result(); err == nil {
+			var cachedCourses []domain.Course
+			if err := json.Unmarshal([]byte(val), &cachedCourses); err == nil {
+				return cachedCourses, nil
+			}
+		}
+	}
+
+	courses, err := u.repo.GetCourses(ctx, role, userID, isFeatured, search, category, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	if u.rdb != nil {
+		if raw, err := json.Marshal(courses); err == nil {
+			_ = u.rdb.Set(ctx, cacheKey, string(raw), 10*time.Minute).Err()
+		}
+	}
+
+	return courses, nil
 }
 
 func (u *courseUsecase) GetCourseByIDOrSlug(ctx context.Context, idOrSlug string, role string, userID int64) (*domain.Course, error) {
-	return u.repo.GetCourseByIDOrSlug(ctx, idOrSlug, role, userID)
+	cacheKey := fmt.Sprintf("course_detail:%s:role:%s", idOrSlug, role)
+
+	if u.rdb != nil {
+		if val, err := u.rdb.Get(ctx, cacheKey).Result(); err == nil {
+			var cachedCourse domain.Course
+			if err := json.Unmarshal([]byte(val), &cachedCourse); err == nil {
+				return &cachedCourse, nil
+			}
+		}
+	}
+
+	course, err := u.repo.GetCourseByIDOrSlug(ctx, idOrSlug, role, userID)
+	if err != nil {
+		return nil, err
+	}
+	if course == nil {
+		return nil, nil
+	}
+
+	if u.rdb != nil {
+		if raw, err := json.Marshal(course); err == nil {
+			_ = u.rdb.Set(ctx, cacheKey, string(raw), 10*time.Minute).Err()
+		}
+	}
+
+	return course, nil
 }
 
 func (u *courseUsecase) CreateCourse(ctx context.Context, course *domain.Course, teacherIDs []int64, subjectIDs []int64) error {
@@ -499,6 +551,7 @@ func (u *courseUsecase) invalidateCache(ctx context.Context, patterns ...string)
 func (u *courseUsecase) invalidateCourseCache(ctx context.Context) {
 	u.invalidateCache(ctx,
 		"courses_list*",
+		"course_detail:*",
 		"homepage_platform_stats",
 		"classes_analytics_summary*",
 		"teacher_overview_*",

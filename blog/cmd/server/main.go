@@ -58,7 +58,7 @@ func main() {
 
 	// 4. Initialize layers
 	repo := repository.NewPostgresBlogRepository(db)
-	uc := usecase.NewBlogUsecase(repo)
+	uc := usecase.NewBlogUsecase(repo, rdb)
 	handler := delivery.NewHttpHandler(uc, cfg.MediaRoot, cfg.BaseURL)
 	authMiddleware := delivery.AuthMiddleware(cfg.SecretKey, rdb)
 	optionalAuthMiddleware := delivery.OptionalAuthMiddleware(cfg.SecretKey)
