@@ -596,44 +596,151 @@ func (h *HttpHandler) ListSchedules(c *gin.Context) {
 	c.JSON(http.StatusOK, schedules)
 }
 
+func parseToInt64(val interface{}) int64 {
+	if val == nil {
+		return 0
+	}
+	switch v := val.(type) {
+	case float64:
+		return int64(v)
+	case int64:
+		return v
+	case int:
+		return int64(v)
+	case string:
+		if i, err := strconv.ParseInt(v, 10, 64); err == nil {
+			return i
+		}
+	}
+	return 0
+}
+
+func parseToPtrInt64(val interface{}) *int64 {
+	if val == nil {
+		return nil
+	}
+	switch v := val.(type) {
+	case float64:
+		i := int64(v)
+		return &i
+	case int64:
+		return &v
+	case int:
+		i := int64(v)
+		return &i
+	case string:
+		if v == "" || v == "null" {
+			return nil
+		}
+		if i, err := strconv.ParseInt(v, 10, 64); err == nil {
+			return &i
+		}
+	}
+	return nil
+}
+
 func (h *HttpHandler) CreateSchedule(c *gin.Context) {
-	var schedule domain.ClassSchedule
-	if err := c.ShouldBindJSON(&schedule); err != nil {
+	var body map[string]interface{}
+	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
 		return
 	}
 
-	// Handle standard input aliases if provided in custom body format
-	var raw struct {
-		Course           int64   `json:"course"`
-		Subject          *int64  `json:"subject"`
-		Teacher          int64   `json:"teacher"`
-		TopicName        string  `json:"topicName"`
-		ClassDate        string  `json:"classDate"`
-		StartTime        string  `json:"startTime"`
-		EndTime          string  `json:"endTime"`
-		ClassStatus      string  `json:"classStatus"`
-		RescheduleReason *string `json:"rescheduleReason"`
-		ClassNotesURL    *string `json:"classNotesUrl"`
-		RecordedClassURL *string `json:"recordedClassUrl"`
+	var schedule domain.ClassSchedule
+
+	// Parse course
+	schedule.CourseID = parseToInt64(body["course"])
+	if schedule.CourseID == 0 {
+		schedule.CourseID = parseToInt64(body["course_id"])
 	}
 
-	// Check if JSON bound properly, otherwise bind manually
-	if schedule.CourseID == 0 {
-		_ = c.ShouldBindJSON(&raw)
-		schedule.CourseID = raw.Course
-		schedule.SubjectID = raw.Subject
-		schedule.TeacherID = raw.Teacher
-		schedule.TopicName = raw.TopicName
-		schedule.ClassStatus = raw.ClassStatus
-		schedule.RescheduleReason = raw.RescheduleReason
-		schedule.ClassNotesURL = raw.ClassNotesURL
-		schedule.RecordedClassURL = raw.RecordedClassURL
-		if t, err := time.Parse("2006-01-02", raw.ClassDate); err == nil {
+	// Parse subject
+	if sub, ok := body["subject"]; ok {
+		schedule.SubjectID = parseToPtrInt64(sub)
+	} else if subID, ok := body["subject_id"]; ok {
+		schedule.SubjectID = parseToPtrInt64(subID)
+	}
+
+	// Parse teacher
+	schedule.TeacherID = parseToInt64(body["teacher"])
+	if schedule.TeacherID == 0 {
+		schedule.TeacherID = parseToInt64(body["teacher_id"])
+	}
+
+	// Parse topicName
+	if topic, ok := body["topicName"].(string); ok {
+		schedule.TopicName = topic
+	} else if topic, ok := body["topic_name"].(string); ok {
+		schedule.TopicName = topic
+	}
+
+	// Parse classDate
+	var classDateStr string
+	if d, ok := body["classDate"].(string); ok {
+		classDateStr = d
+	} else if d, ok := body["class_date"].(string); ok {
+		classDateStr = d
+	}
+	if classDateStr != "" {
+		if t, err := time.Parse("2006-01-02", classDateStr); err == nil {
+			schedule.ClassDate = domain.DateStr(t)
+		} else if t, err := time.Parse("02-01-2006", classDateStr); err == nil {
+			schedule.ClassDate = domain.DateStr(t)
+		} else if t, err := time.Parse(time.RFC3339, classDateStr); err == nil {
 			schedule.ClassDate = domain.DateStr(t)
 		}
-		schedule.StartTime = domain.TimeStr(raw.StartTime)
-		schedule.EndTime = domain.TimeStr(raw.EndTime)
+	}
+
+	// Parse startTime / endTime
+	var startTimeStr string
+	if t, ok := body["startTime"].(string); ok {
+		startTimeStr = t
+	} else if t, ok := body["start_time"].(string); ok {
+		startTimeStr = t
+	}
+	schedule.StartTime = domain.TimeStr(startTimeStr)
+
+	var endTimeStr string
+	if t, ok := body["endTime"].(string); ok {
+		endTimeStr = t
+	} else if t, ok := body["end_time"].(string); ok {
+		endTimeStr = t
+	}
+	schedule.EndTime = domain.TimeStr(endTimeStr)
+
+	// Parse batchId
+	if b, ok := body["batchId"].(string); ok {
+		schedule.BatchID = b
+	} else if b, ok := body["batch_id"].(string); ok {
+		schedule.BatchID = b
+	}
+
+	// Parse classStatus
+	if s, ok := body["classStatus"].(string); ok {
+		schedule.ClassStatus = s
+	} else if s, ok := body["class_status"].(string); ok {
+		schedule.ClassStatus = s
+	}
+
+	// Parse rescheduleReason
+	if r, ok := body["rescheduleReason"].(string); ok {
+		schedule.RescheduleReason = &r
+	} else if r, ok := body["reschedule_reason"].(string); ok {
+		schedule.RescheduleReason = &r
+	}
+
+	// Parse classNotesUrl
+	if n, ok := body["classNotesUrl"].(string); ok {
+		schedule.ClassNotesURL = &n
+	} else if n, ok := body["class_notes_url"].(string); ok {
+		schedule.ClassNotesURL = &n
+	}
+
+	// Parse recordedClassUrl
+	if rec, ok := body["recordedClassUrl"].(string); ok {
+		schedule.RecordedClassURL = &rec
+	} else if rec, ok := body["recorded_class_url"].(string); ok {
+		schedule.RecordedClassURL = &rec
 	}
 
 	if err := h.usecase.CreateSchedule(c.Request.Context(), &schedule); err != nil {
