@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -70,7 +71,60 @@ func (r *postgresNoteRepository) GetNotes(ctx context.Context, filters map[strin
 	}
 
 	err := query.Order("notes.created_at DESC").Find(&notes).Error
-	return notes, err
+	if err != nil {
+		return nil, err
+	}
+
+	// Union with class_schedules materials if noteType is 'class'
+	if noteType, ok := filters["noteType"]; ok && noteType == "class" {
+		var scheduleNotes []domain.Note
+		scheduleQuery := r.db.WithContext(ctx).Table("class_schedules cs").
+			Select("cs.id, cs.topic_name AS title, '' AS description, 'class' AS note_type, true AS is_free, 0.0 AS price, cs.batch_id, cs.class_notes_url AS file_url, cs.created_at, cs.course_id, cs.recorded_class_url, s.subject_name AS subject, cs.topic_name AS topic, '' AS prerequisite_url, c.course_name AS course_name").
+			Joins("LEFT JOIN subjects s ON cs.subject_id = s.id").
+			Joins("LEFT JOIN courses c ON cs.course_id = c.id")
+
+		if courseIDsStr, ok := filters["courseIds"]; ok && courseIDsStr != "" {
+			parts := strings.Split(courseIDsStr, ",")
+			var ids []int64
+			for _, p := range parts {
+				if id, err := strconv.ParseInt(p, 10, 64); err == nil {
+					ids = append(ids, id)
+				}
+			}
+			if len(ids) > 0 {
+				scheduleQuery = scheduleQuery.Where("cs.course_id IN ?", ids)
+			} else {
+				scheduleQuery = scheduleQuery.Where("1 = 0")
+			}
+		} else if courseIDStr, ok := filters["courseId"]; ok && courseIDStr != "" {
+			if courseID, err := strconv.ParseInt(courseIDStr, 10, 64); err == nil {
+				scheduleQuery = scheduleQuery.Where("cs.course_id = ?", courseID)
+			}
+		}
+
+		if category, ok := filters["category"]; ok && category != "" {
+			scheduleQuery = scheduleQuery.Where("c.category = ?", category)
+		}
+
+		if search, ok := filters["search"]; ok && search != "" {
+			searchParam := "%" + strings.ToLower(search) + "%"
+			scheduleQuery = scheduleQuery.Where("LOWER(cs.topic_name) LIKE ? OR LOWER(s.subject_name) LIKE ?", searchParam, searchParam)
+		}
+
+		// Only fetch schedules with uploaded materials
+		scheduleQuery = scheduleQuery.Where("cs.class_notes_url <> '' OR cs.recorded_class_url <> ''")
+
+		if err := scheduleQuery.Find(&scheduleNotes).Error; err == nil {
+			notes = append(notes, scheduleNotes...)
+		}
+
+		// Sort combined slice by created_at DESC
+		sort.Slice(notes, func(i, j int) bool {
+			return notes[i].CreatedAt.After(notes[j].CreatedAt)
+		})
+	}
+
+	return notes, nil
 }
 
 func (r *postgresNoteRepository) GetNoteByIDOrSlug(ctx context.Context, idOrSlug string) (*domain.Note, error) {
