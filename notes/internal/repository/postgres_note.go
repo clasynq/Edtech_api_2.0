@@ -163,21 +163,43 @@ func (r *postgresNoteRepository) UpdateNote(ctx context.Context, note *domain.No
 }
 
 func (r *postgresNoteRepository) DeleteNote(ctx context.Context, id int64) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// 1. Delete referencing note_accesses records
-		if err := tx.Exec("DELETE FROM note_accesses WHERE note_id = ?", id).Error; err != nil {
-			return err
-		}
-		// 2. Nullify referencing payment_orders records
-		if err := tx.Exec("UPDATE payment_orders SET note_id = NULL WHERE note_id = ?", id).Error; err != nil {
-			return err
-		}
-		// 3. Delete the note record
-		if err := tx.Delete(&domain.Note{}, id).Error; err != nil {
-			return err
-		}
-		return nil
-	})
+	// Check if note exists in notes table
+	var count int64
+	if err := r.db.WithContext(ctx).Model(&domain.Note{}).Where("id = ?", id).Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			// 1. Delete referencing note_accesses records
+			if err := tx.Exec("DELETE FROM note_accesses WHERE note_id = ?", id).Error; err != nil {
+				return err
+			}
+			// 2. Nullify referencing payment_orders records
+			if err := tx.Exec("UPDATE payment_orders SET note_id = NULL WHERE note_id = ?", id).Error; err != nil {
+				return err
+			}
+			// 3. Delete the note record
+			if err := tx.Delete(&domain.Note{}, id).Error; err != nil {
+				return err
+			}
+			return nil
+		})
+	}
+
+	// Not found in notes table, check if it's a class schedule from class_schedules
+	var csCount int64
+	if err := r.db.WithContext(ctx).Table("class_schedules").Where("id = ?", id).Count(&csCount).Error; err != nil {
+		return err
+	}
+	if csCount > 0 {
+		// Clear/Nullify the notes and recording URLs on this schedule
+		return r.db.WithContext(ctx).Table("class_schedules").Where("id = ?", id).Updates(map[string]interface{}{
+			"class_notes_url":    "",
+			"recorded_class_url": "",
+		}).Error
+	}
+
+	return errors.New("note not found")
 }
 
 func (r *postgresNoteRepository) GetStudentByUserID(ctx context.Context, userID int64) (*domain.Student, error) {

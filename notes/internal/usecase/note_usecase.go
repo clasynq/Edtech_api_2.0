@@ -286,17 +286,24 @@ func (u *noteUsecase) UpdateNote(ctx context.Context, idOrSlug string, updates m
 }
 func (u *noteUsecase) DeleteNote(ctx context.Context, idOrSlug string) error {
 	note, err := u.repo.GetNoteByIDOrSlug(ctx, idOrSlug)
-	if err != nil {
-		return err
+	if err == nil && note != nil {
+		if err := u.repo.DeleteNote(ctx, note.ID); err != nil {
+			return err
+		}
+		u.invalidateNotesCache(ctx)
+		return nil
 	}
-	if note == nil {
-		return errors.New("note not found")
+
+	// Fallback check for numeric ID (for class_schedules)
+	if id, err := strconv.ParseInt(idOrSlug, 10, 64); err == nil {
+		if err := u.repo.DeleteNote(ctx, id); err != nil {
+			return err
+		}
+		u.invalidateNotesCache(ctx)
+		return nil
 	}
-	if err := u.repo.DeleteNote(ctx, note.ID); err != nil {
-		return err
-	}
-	u.invalidateNotesCache(ctx)
-	return nil
+
+	return errors.New("note not found")
 }
 func (u *noteUsecase) HasAccess(ctx context.Context, userID int64, role string, noteIDOrSlug string) (bool, error) {
 	note, err := u.repo.GetNoteByIDOrSlug(ctx, noteIDOrSlug)
