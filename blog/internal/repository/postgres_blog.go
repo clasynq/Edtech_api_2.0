@@ -70,7 +70,33 @@ func (r *postgresBlogRepository) UpdatePost(ctx context.Context, post *domain.Bl
 }
 
 func (r *postgresBlogRepository) DeletePost(ctx context.Context, id int64) error {
-	return r.db.WithContext(ctx).Delete(&domain.BlogPost{}, id).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// 1. Delete from post_views
+		if err := tx.Where("post_id = ?", id).Delete(&domain.PostView{}).Error; err != nil {
+			return err
+		}
+		// 2. Delete from blog_likes
+		if err := tx.Where("post_id = ?", id).Delete(&domain.BlogLike{}).Error; err != nil {
+			return err
+		}
+		// 3. Delete from blog_comments
+		if err := tx.Where("post_id = ?", id).Delete(&domain.BlogComment{}).Error; err != nil {
+			return err
+		}
+		// 4. Delete from reposts
+		if err := tx.Where("post_id = ?", id).Delete(&domain.Repost{}).Error; err != nil {
+			return err
+		}
+		// 5. Delete from saved_posts
+		if err := tx.Where("post_id = ?", id).Delete(&domain.SavedPost{}).Error; err != nil {
+			return err
+		}
+		// 6. Finally delete the post itself
+		if err := tx.Delete(&domain.BlogPost{}, id).Error; err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 func (r *postgresBlogRepository) IsLiked(ctx context.Context, userID, postID int64) (bool, error) {
