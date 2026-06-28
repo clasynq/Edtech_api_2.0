@@ -72,6 +72,8 @@ func main() {
 		runCreateAdmin(dbURL)
 	case "updatepass":
 		runUpdatePass(dbURL)
+	case "updateemail":
+		runUpdateEmail(dbURL)
 	case "help":
 		printHelp()
 	default:
@@ -92,6 +94,7 @@ func printHelp() {
 	fmt.Println("  flushall                             Truncate all data tables (clears DB but keeps schemas)")
 	fmt.Println("  createadmin                          Create a new admin query and output insert SQL file")
 	fmt.Println("  updatepass                           Update an admin password and output update SQL file")
+	fmt.Println("  updateemail                          Update an admin email address and output update SQL file")
 	fmt.Println("  help                                 Show this help screen")
 	fmt.Println("\nValid Services:")
 	for _, s := range validServices {
@@ -606,6 +609,84 @@ WHERE email = '%s';`, hashedPassword, email)
 
 	// Write to a file as well for convenience
 	filename := "update_admin.sql"
+	absPath, err := filepath.Abs(filename)
+	if err != nil {
+		absPath = filename
+	}
+
+	err = os.WriteFile(filename, []byte(sqlQuery), 0644)
+	if err != nil {
+		fmt.Printf("\nWarning: Could not save query to file: %v\n", err)
+	} else {
+		fmt.Printf("\nSaved query to file: %s\n", absPath)
+	}
+
+	// Ask if user wants to execute the query immediately on the database
+	fmt.Print("\nDo you want to execute this query on the database immediately? (y/N): ")
+	confirmInput, err := reader.ReadString('\n')
+	if err == nil {
+		confirm := strings.TrimSpace(strings.ToLower(confirmInput))
+		if confirm == "y" || confirm == "yes" {
+			fmt.Println("Connecting to database...")
+			db := connectDB(dbURL)
+			if err := db.Exec(sqlQuery).Error; err != nil {
+				fmt.Printf("Error executing query: %v\n", err)
+			} else {
+				fmt.Println("Success: Query executed and applied to database successfully!")
+			}
+		}
+	}
+}
+
+// ----------------------------------------------------
+// UPDATEEMAIL COMMAND
+// ----------------------------------------------------
+func runUpdateEmail(dbURL string) {
+	fmt.Println(strings.Repeat("=", 60))
+	fmt.Println("  ClaSynq Admin Email Update SQL Generator (Go)")
+	fmt.Println(strings.Repeat("=", 60))
+
+	reader := bufio.NewReader(os.Stdin)
+
+	// Prompt for old email
+	fmt.Print("Enter Current Admin Email: ")
+	oldEmailInput, err := reader.ReadString('\n')
+	if err != nil {
+		fmt.Printf("Error reading email: %v\n", err)
+		os.Exit(1)
+	}
+	oldEmail := strings.ToLower(strings.TrimSpace(oldEmailInput))
+	if oldEmail == "" {
+		fmt.Println("Error: Current Email cannot be empty.")
+		os.Exit(1)
+	}
+
+	// Prompt for new email
+	fmt.Print("Enter New Admin Email: ")
+	newEmailInput, err := reader.ReadString('\n')
+	if err != nil {
+		fmt.Printf("Error reading email: %v\n", err)
+		os.Exit(1)
+	}
+	newEmail := strings.ToLower(strings.TrimSpace(newEmailInput))
+	if newEmail == "" {
+		fmt.Println("Error: New Email cannot be empty.")
+		os.Exit(1)
+	}
+
+	// Generate SQL Statement
+	sqlQuery := fmt.Sprintf(`UPDATE admin 
+SET email = '%s' 
+WHERE email = '%s';`, newEmail, oldEmail)
+
+	fmt.Println("\n" + strings.Repeat("=", 60))
+	fmt.Println("  GENERATED SQL QUERY (Copy and run this in your database client)")
+	fmt.Println(strings.Repeat("=", 60))
+	fmt.Println(sqlQuery)
+	fmt.Println(strings.Repeat("=", 60))
+
+	// Write to a file as well for convenience
+	filename := "update_admin_email.sql"
 	absPath, err := filepath.Abs(filename)
 	if err != nil {
 		absPath = filename
