@@ -54,8 +54,12 @@ func (h *HttpHandler) RegisterRoutes(r *gin.Engine, authMiddleware gin.HandlerFu
 			me.PUT("/change-password/", h.ChangePassword)
 			me.POST("/follow/:id", h.FollowUser)
 			me.POST("/follow/:id/", h.FollowUser)
+			me.POST("/follow", h.ToggleFollowUser)
+			me.POST("/follow/", h.ToggleFollowUser)
 			me.DELETE("/unfollow/:id", h.UnfollowUser)
 			me.DELETE("/unfollow/:id/", h.UnfollowUser)
+			me.GET("/search", h.SearchUsers)
+			me.GET("/search/", h.SearchUsers)
 			me.GET("/notifications", h.GetNotifications)
 			me.GET("/notifications/", h.GetNotifications)
 			me.POST("/notifications/read", h.MarkNotificationsAsRead)
@@ -484,4 +488,35 @@ func (h *HttpHandler) MarkNotificationsAsRead(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "All notifications marked as read."})
+}
+
+func (h *HttpHandler) SearchUsers(c *gin.Context) {
+	query := c.Query("q")
+	res, err := h.usecase.SearchUsers(c.Request.Context(), query)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"users": res})
+}
+
+type toggleFollowReq struct {
+	UserID int64 `json:"userId" binding:"required"`
+}
+
+func (h *HttpHandler) ToggleFollowUser(c *gin.Context) {
+	followerID, _ := c.Get("userID")
+	var req toggleFollowReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid user ID."})
+		return
+	}
+
+	err := h.usecase.ToggleFollowUser(c.Request.Context(), followerID.(int64), req.UserID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Successfully toggled follow state."})
 }

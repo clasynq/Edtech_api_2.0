@@ -940,3 +940,16 @@ func (u *userUsecase) TokenRefresh(ctx context.Context, refreshToken string) (ma
 	return newTokens, nil
 }
 
+func (u *userUsecase) ToggleFollowUser(ctx context.Context, followerID, followedID int64) error {
+	existing, err := u.repo.GetFollowRelationship(ctx, followerID, followedID)
+	if err != nil {
+		return err
+	}
+
+	if existing != nil {
+		return u.repo.UnfollowUser(ctx, followerID, followedID)
+	}
+
+	return u.FollowUser(ctx, followerID, followedID)
+}
+

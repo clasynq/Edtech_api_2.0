@@ -192,6 +192,7 @@ type UserUsecase interface {
 	UpdateMe(ctx context.Context, userID int64, updates map[string]interface{}) (map[string]interface{}, error)
 	ChangePassword(ctx context.Context, userID int64, oldPassword, newPassword string) error
 	SearchUsers(ctx context.Context, query string) ([]map[string]interface{}, error)
+	ToggleFollowUser(ctx context.Context, followerID, followedID int64) error
 	FollowUser(ctx context.Context, followerID, followedID int64) error
 	UnfollowUser(ctx context.Context, followerID, followedID int64) error
 	GetNotifications(ctx context.Context, userID int64, role string) ([]UserNotification, error)
