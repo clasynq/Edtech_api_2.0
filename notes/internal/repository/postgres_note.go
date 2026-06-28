@@ -111,6 +111,12 @@ func (r *postgresNoteRepository) GetNotes(ctx context.Context, filters map[strin
 			scheduleQuery = scheduleQuery.Where("LOWER(cs.topic_name) LIKE ? OR LOWER(s.subject_name) LIKE ?", searchParam, searchParam)
 		}
 
+		if teacherIDStr, ok := filters["teacherId"]; ok && teacherIDStr != "" {
+			if teacherID, err := strconv.ParseInt(teacherIDStr, 10, 64); err == nil {
+				scheduleQuery = scheduleQuery.Where("cs.teacher_id = ?", teacherID)
+			}
+		}
+
 		// Only fetch schedules with uploaded materials
 		scheduleQuery = scheduleQuery.Where("cs.class_notes_url <> '' OR cs.recorded_class_url <> ''")
 

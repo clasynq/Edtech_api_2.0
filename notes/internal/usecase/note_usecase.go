@@ -88,9 +88,12 @@ func (u *noteUsecase) GetNotes(ctx context.Context, userID int64, role string, f
 }
 
 func (u *noteUsecase) GetClassNotes(ctx context.Context, userID int64, role string, filters map[string]string) ([]domain.Note, error) {
-	// If role is admin or teacher, they see all class notes
+	// If role is admin or teacher, they see class notes
 	if role == "admin" || role == "teacher" {
 		filters["noteType"] = "class"
+		if role == "teacher" {
+			filters["teacherId"] = strconv.FormatInt(userID, 10)
+		}
 		return u.GetNotes(ctx, userID, role, filters)
 	}
 
