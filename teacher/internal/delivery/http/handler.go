@@ -217,6 +217,10 @@ func (h *HttpHandler) UpdateClass(c *gin.Context) {
 		updates["class_notes_url"] = notesURL
 	}
 
+	if desc := c.PostForm("description"); desc != "" {
+		updates["description"] = desc
+	}
+
 	if subject := c.PostForm("subject"); subject != "" {
 		if subID, err := strconv.ParseInt(subject, 10, 64); err == nil {
 			updates["subject"] = subID

@@ -611,6 +611,11 @@ func (u *teacherUsecase) UpdateClass(ctx context.Context, teacherID, classID int
 	} else if recordedURL, ok := updates["recorded_class_url"].(string); ok {
 		schedule.RecordedClassURL = &recordedURL
 	}
+	if descVal, ok := updates["description"]; ok {
+		if desc, ok := descVal.(string); ok {
+			schedule.Description = &desc
+		}
+	}
 	if subjectIDRaw, ok := updates["subject"]; ok {
 		subID := u.toInt64(subjectIDRaw)
 		if subID > 0 {

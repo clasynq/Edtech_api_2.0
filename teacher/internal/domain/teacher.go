@@ -94,6 +94,7 @@ type ClassSchedule struct {
 	RescheduleReason *string    `gorm:"column:reschedule_reason" json:"rescheduleReason"`
 	ClassNotesURL    *string    `gorm:"column:class_notes_url" json:"classNotesUrl"`
 	RecordedClassURL *string    `gorm:"column:recorded_class_url" json:"recordedClassUrl"`
+	Description      *string    `gorm:"column:description" json:"description"`
 	CreatedAt        time.Time  `gorm:"column:created_at;autoCreateTime" json:"createdAt"`
 	
 	// Preloaded relationships

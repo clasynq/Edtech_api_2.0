@@ -79,7 +79,7 @@ func (r *postgresNoteRepository) GetNotes(ctx context.Context, filters map[strin
 	if noteType, ok := filters["noteType"]; ok && noteType == "class" {
 		var scheduleNotes []domain.Note
 		scheduleQuery := r.db.WithContext(ctx).Table("class_schedules cs").
-			Select("cs.id, cs.topic_name AS title, '' AS description, 'class' AS note_type, true AS is_free, 0.0 AS price, cs.batch_id, cs.class_notes_url AS file_url, cs.created_at, cs.course_id, cs.recorded_class_url, s.subject_name AS subject, cs.topic_name AS topic, '' AS prerequisite_url, c.course_name AS course_name").
+			Select("cs.id, cs.topic_name AS title, cs.description AS description, 'class' AS note_type, true AS is_free, 0.0 AS price, cs.batch_id, cs.class_notes_url AS file_url, cs.created_at, cs.course_id, cs.recorded_class_url, s.subject_name AS subject, cs.topic_name AS topic, '' AS prerequisite_url, c.course_name AS course_name").
 			Joins("LEFT JOIN subjects s ON cs.subject_id = s.id").
 			Joins("LEFT JOIN courses c ON cs.course_id = c.id")
 
