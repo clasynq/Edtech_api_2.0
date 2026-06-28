@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"clasynq/api/blog/internal/domain"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -57,6 +58,7 @@ func (h *HttpHandler) RegisterRoutes(r *gin.Engine, authMiddleware gin.HandlerFu
 			api.POST("/users/:id/follow", h.FollowToggle)
 			api.POST("/users/:id/follow/", h.FollowToggle)
 			api.POST("", h.CreatePost)
+			api.POST("/", h.CreatePost)
 			api.PUT("/:slug", h.UpdatePost)
 			api.DELETE("/:slug", h.DeletePost)
 
@@ -259,16 +261,36 @@ func (h *HttpHandler) UpdatePost(c *gin.Context) {
 	contentType := c.ContentType()
 	if strings.Contains(contentType, "multipart/form-data") {
 		updates = make(map[string]interface{})
-		if val, ok := c.GetPostForm("title"); ok { updates["title"] = val }
-		if val, ok := c.GetPostForm("excerpt"); ok { updates["excerpt"] = val }
-		if val, ok := c.GetPostForm("content"); ok { updates["content"] = val }
-		if val, ok := c.GetPostForm("category"); ok { updates["category"] = val }
-		if val, ok := c.GetPostForm("exploreLink"); ok { updates["exploreLink"] = val }
-		if val, ok := c.GetPostForm("explore_link"); ok { updates["exploreLink"] = val }
-		if val, ok := c.GetPostForm("imageUrl"); ok { updates["imageUrl"] = val }
-		if val, ok := c.GetPostForm("image_url"); ok { updates["imageUrl"] = val }
-		if val, ok := c.GetPostForm("videoUrl"); ok { updates["videoUrl"] = val }
-		if val, ok := c.GetPostForm("video_url"); ok { updates["videoUrl"] = val }
+		if val, ok := c.GetPostForm("title"); ok {
+			updates["title"] = val
+		}
+		if val, ok := c.GetPostForm("excerpt"); ok {
+			updates["excerpt"] = val
+		}
+		if val, ok := c.GetPostForm("content"); ok {
+			updates["content"] = val
+		}
+		if val, ok := c.GetPostForm("category"); ok {
+			updates["category"] = val
+		}
+		if val, ok := c.GetPostForm("exploreLink"); ok {
+			updates["exploreLink"] = val
+		}
+		if val, ok := c.GetPostForm("explore_link"); ok {
+			updates["exploreLink"] = val
+		}
+		if val, ok := c.GetPostForm("imageUrl"); ok {
+			updates["imageUrl"] = val
+		}
+		if val, ok := c.GetPostForm("image_url"); ok {
+			updates["imageUrl"] = val
+		}
+		if val, ok := c.GetPostForm("videoUrl"); ok {
+			updates["videoUrl"] = val
+		}
+		if val, ok := c.GetPostForm("video_url"); ok {
+			updates["videoUrl"] = val
+		}
 		if val, ok := c.GetPostForm("tags"); ok {
 			var tags []string
 			if err := json.Unmarshal([]byte(val), &tags); err == nil {
@@ -530,16 +552,36 @@ func (h *HttpHandler) UpdateAdminBlogPost(c *gin.Context) {
 		if val, ok := c.GetPostForm("is_restricted"); ok {
 			updates["is_restricted"] = val == "true"
 		}
-		if val, ok := c.GetPostForm("title"); ok { updates["title"] = val }
-		if val, ok := c.GetPostForm("excerpt"); ok { updates["excerpt"] = val }
-		if val, ok := c.GetPostForm("content"); ok { updates["content"] = val }
-		if val, ok := c.GetPostForm("category"); ok { updates["category"] = val }
-		if val, ok := c.GetPostForm("exploreLink"); ok { updates["exploreLink"] = val }
-		if val, ok := c.GetPostForm("explore_link"); ok { updates["exploreLink"] = val }
-		if val, ok := c.GetPostForm("imageUrl"); ok { updates["imageUrl"] = val }
-		if val, ok := c.GetPostForm("image_url"); ok { updates["imageUrl"] = val }
-		if val, ok := c.GetPostForm("videoUrl"); ok { updates["videoUrl"] = val }
-		if val, ok := c.GetPostForm("video_url"); ok { updates["videoUrl"] = val }
+		if val, ok := c.GetPostForm("title"); ok {
+			updates["title"] = val
+		}
+		if val, ok := c.GetPostForm("excerpt"); ok {
+			updates["excerpt"] = val
+		}
+		if val, ok := c.GetPostForm("content"); ok {
+			updates["content"] = val
+		}
+		if val, ok := c.GetPostForm("category"); ok {
+			updates["category"] = val
+		}
+		if val, ok := c.GetPostForm("exploreLink"); ok {
+			updates["exploreLink"] = val
+		}
+		if val, ok := c.GetPostForm("explore_link"); ok {
+			updates["exploreLink"] = val
+		}
+		if val, ok := c.GetPostForm("imageUrl"); ok {
+			updates["imageUrl"] = val
+		}
+		if val, ok := c.GetPostForm("image_url"); ok {
+			updates["imageUrl"] = val
+		}
+		if val, ok := c.GetPostForm("videoUrl"); ok {
+			updates["videoUrl"] = val
+		}
+		if val, ok := c.GetPostForm("video_url"); ok {
+			updates["videoUrl"] = val
+		}
 		if val, ok := c.GetPostForm("tags"); ok {
 			var tags []string
 			if err := json.Unmarshal([]byte(val), &tags); err == nil {
