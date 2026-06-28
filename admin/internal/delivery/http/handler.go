@@ -433,6 +433,38 @@ func (h *HttpHandler) GetCareersPositions(c *gin.Context) {
 }
 
 func (h *HttpHandler) SubmitJobApplication(c *gin.Context) {
+	// Honeypot spam check
+	if c.PostForm("middle_name") != "" {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid submission."})
+		return
+	}
+
+	// Link/URL spam markers check
+	spamMarkers := []string{"http://", "https://", "www.", "<a href=", "[url="}
+	textFields := []string{"full_name", "qualification", "branch", "apply_for_role", "specialization"}
+	for _, field := range textFields {
+		val := strings.ToLower(c.PostForm(field))
+		for _, marker := range spamMarkers {
+			if strings.Contains(val, marker) {
+				c.JSON(http.StatusBadRequest, gin.H{"message": "Links and promotional content are not allowed."})
+				return
+			}
+		}
+	}
+
+	// Phone number validation (only numeric, space, basic symbols)
+	phone := c.PostForm("phone")
+	if phone == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "phone is required"})
+		return
+	}
+	for _, char := range phone {
+		if (char < '0' || char > '9') && char != '+' && char != '-' && char != '(' && char != ')' && char != ' ' {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid mobile number format."})
+			return
+		}
+	}
+
 	// Check resume_file size & type
 	resumeHeader, err := c.FormFile("resume_file")
 	if err != nil {
