@@ -657,7 +657,7 @@ func (u *teacherUsecase) DeleteClass(ctx context.Context, teacherID, classID int
 	return nil
 }
 
-func (u *teacherUsecase) UploadNote(ctx context.Context, teacherID int64, batchID, title, fileURL, recordedClassURL, subject, topic, prerequisiteURL string) (map[string]interface{}, error) {
+func (u *teacherUsecase) UploadNote(ctx context.Context, teacherID int64, batchID, title, fileURL, recordedClassURL, subject, topic, prerequisiteURL, description string) (map[string]interface{}, error) {
 	course, err := u.repo.GetCourseByBatchID(ctx, batchID)
 	if err != nil {
 		return nil, err
@@ -683,7 +683,7 @@ func (u *teacherUsecase) UploadNote(ctx context.Context, teacherID int64, batchI
 
 	note := &domain.Note{
 		Title:            title,
-		Description:      "",
+		Description:      description,
 		NoteType:         "class",
 		IsFree:           false,
 		Price:            0.0,

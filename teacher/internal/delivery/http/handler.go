@@ -317,7 +317,9 @@ func (h *HttpHandler) UploadNote(c *gin.Context) {
 		}
 	}
 
-	res, err := h.usecase.UploadNote(c.Request.Context(), teacherID, batchID, title, fileURL, recordedClassURL, subject, topic, prerequisiteURL)
+	description := c.PostForm("description")
+
+	res, err := h.usecase.UploadNote(c.Request.Context(), teacherID, batchID, title, fileURL, recordedClassURL, subject, topic, prerequisiteURL, description)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
 		return
