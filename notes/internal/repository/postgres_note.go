@@ -124,7 +124,27 @@ func (r *postgresNoteRepository) GetStudentByUserID(ctx context.Context, userID 
 	var student domain.Student
 	if err := r.db.WithContext(ctx).Where("user_id = ?", userID).First(&student).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
+			// Check if the user exists in the users table first to prevent foreign key constraint violation
+			var count int64
+			if err := r.db.WithContext(ctx).Table("users").Where("id = ?", userID).Count(&count).Error; err != nil {
+				return nil, err
+			}
+			if count == 0 {
+				return nil, nil
+			}
+
+			// Create the student profile on the fly
+			student = domain.Student{
+				UserID: userID,
+			}
+			if err := r.db.WithContext(ctx).Create(&student).Error; err != nil {
+				// Handle potential race conditions by trying to fetch one more time
+				if err2 := r.db.WithContext(ctx).Where("user_id = ?", userID).First(&student).Error; err2 == nil {
+					return &student, nil
+				}
+				return nil, err
+			}
+			return &student, nil
 		}
 		return nil, err
 	}
