@@ -73,9 +73,48 @@ func (u *noteUsecase) GetNotes(ctx context.Context, userID int64, role string, f
 	}
 
 	// Determine access for each note and mask URL if no access
+	var student *domain.Student
+	enrolledCourses := make(map[int64]bool)
+	directAccesses := make(map[int64]bool)
+	hasAccessListsLoaded := false
+
 	for i := range notes {
-		hasAccess, err := u.checkAccess(ctx, userID, role, &notes[i])
-		if err != nil || !hasAccess {
+		var hasAccess bool
+		if role == "admin" || role == "teacher" {
+			hasAccess = true
+		} else if notes[i].IsFree {
+			hasAccess = true
+		} else if userID <= 0 {
+			hasAccess = false
+		} else {
+			// Lazy load access lists once if userID > 0 and not admin/teacher
+			if !hasAccessListsLoaded {
+				if s, err := u.repo.GetStudentByUserID(ctx, userID); err == nil && s != nil {
+					student = s
+					if courseIDs, err := u.repo.GetEnrolledCourseIDs(ctx, s.ID); err == nil {
+						for _, cid := range courseIDs {
+							enrolledCourses[cid] = true
+						}
+					}
+					if noteIDs, err := u.repo.GetNoteAccesses(ctx, s.ID); err == nil {
+						for _, nid := range noteIDs {
+							directAccesses[nid] = true
+						}
+					}
+				}
+				hasAccessListsLoaded = true
+			}
+
+			if student != nil {
+				if directAccesses[notes[i].ID] {
+					hasAccess = true
+				} else if notes[i].CourseID != nil && enrolledCourses[*notes[i].CourseID] {
+					hasAccess = true
+				}
+			}
+		}
+
+		if !hasAccess {
 			notes[i].FileURL = "" // mask URL
 			notes[i].IsUnlocked = false
 		} else {

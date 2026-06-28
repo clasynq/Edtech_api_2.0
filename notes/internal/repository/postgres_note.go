@@ -262,3 +262,11 @@ func (r *postgresNoteRepository) GetEnrolledCourseIDs(ctx context.Context, stude
 		Pluck("course_id", &courseIDs).Error
 	return courseIDs, err
 }
+
+func (r *postgresNoteRepository) GetNoteAccesses(ctx context.Context, studentID int64) ([]int64, error) {
+	var noteIDs []int64
+	err := r.db.WithContext(ctx).Table("note_accesses").
+		Where("student_id = ?", studentID).
+		Pluck("note_id", &noteIDs).Error
+	return noteIDs, err
+}

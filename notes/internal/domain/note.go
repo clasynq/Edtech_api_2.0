@@ -82,6 +82,7 @@ type NoteRepository interface {
 	GetEnrolledCourseIDs(ctx context.Context, studentID int64) ([]int64, error)
 	HasNoteAccess(ctx context.Context, studentID, noteID int64) (bool, error)
 	IsStudentEnrolledInCourse(ctx context.Context, studentID, courseID int64) (bool, error)
+	GetNoteAccesses(ctx context.Context, studentID int64) ([]int64, error)
 }
 
 type NoteUsecase interface {

@@ -342,29 +342,66 @@ func (r *postgresEnrollmentRepository) GetMyEnrollments(ctx context.Context, stu
 		return nil, err
 	}
 
+	// Pre-fetch teacher details to avoid N+1 query problem
+	var courseIDs []int64
+	var directTeacherIDs []int64
+	for _, res := range results {
+		courseIDs = append(courseIDs, res.CourseID)
+		if res.TeacherID != nil {
+			directTeacherIDs = append(directTeacherIDs, *res.TeacherID)
+		}
+	}
+
+	type CourseTeacher struct {
+		CourseID int64  `gorm:"column:course_id"`
+		Name     string `gorm:"column:name"`
+	}
+	var ctResults []CourseTeacher
+	if len(courseIDs) > 0 {
+		_ = r.db.WithContext(ctx).Table("teachers t").
+			Select("ct.course_id, t.name").
+			Joins("JOIN courses_teachers ct ON t.id = ct.teacher_id").
+			Where("ct.course_id IN ?", courseIDs).
+			Find(&ctResults).Error
+	}
+
+	type DirectTeacher struct {
+		ID   int64  `gorm:"column:id"`
+		Name string `gorm:"column:name"`
+	}
+	var dtResults []DirectTeacher
+	if len(directTeacherIDs) > 0 {
+		_ = r.db.WithContext(ctx).Table("teachers").
+			Select("id, name").
+			Where("id IN ?", directTeacherIDs).
+			Find(&dtResults).Error
+	}
+
+	// Build lookup maps
+	m2mTeachers := make(map[int64][]string)
+	for _, ct := range ctResults {
+		m2mTeachers[ct.CourseID] = append(m2mTeachers[ct.CourseID], ct.Name)
+	}
+
+	directTeachers := make(map[int64]string)
+	for _, dt := range dtResults {
+		directTeachers[dt.ID] = dt.Name
+	}
+
 	data := make([]map[string]interface{}, 0)
 	for _, res := range results {
 		mentorName := "Instructor"
 
 		// 1. Check direct teacher_id first
 		if res.TeacherID != nil {
-			var tName string
-			err := r.db.WithContext(ctx).Table("teachers").Select("name").Where("id = ?", *res.TeacherID).Row().Scan(&tName)
-			if err == nil && tName != "" {
-				mentorName = tName
+			if name, ok := directTeachers[*res.TeacherID]; ok && name != "" {
+				mentorName = name
 			}
 		}
 
-		// 2. Check ManyToMany course_teachers table (usually courses_teachers in Django)
-		var m2mNames []string
-		err := r.db.WithContext(ctx).Table("teachers t").
-			Select("t.name").
-			Joins("JOIN courses_teachers ct ON t.id = ct.teacher_id").
-			Where("ct.course_id = ?", res.CourseID).
-			Find(&m2mNames).Error
-
-		if err == nil && len(m2mNames) > 0 {
-			mentorName = strings.Join(m2mNames, ", ")
+		// 2. Check ManyToMany course_teachers
+		if names, ok := m2mTeachers[res.CourseID]; ok && len(names) > 0 {
+			mentorName = strings.Join(names, ", ")
 		}
 
 		enrolledOn := "Recently"
