@@ -631,6 +631,7 @@ func (u *teacherUsecase) UpdateClass(ctx context.Context, teacherID, classID int
 
 	_ = u.repo.LogTeacherActivity(ctx, teacherID, "Updated", "Class Session", fmt.Sprintf("%s (Status: %s)", schedule.TopicName, schedule.ClassStatus))
 	u.invalidateCache(ctx, teacherID)
+	u.invalidateNotesCache(ctx)
 
 	fullSched, _ := u.repo.GetClassScheduleByID(ctx, classID)
 	if fullSched != nil {
@@ -659,6 +660,7 @@ func (u *teacherUsecase) DeleteClass(ctx context.Context, teacherID, classID int
 
 	_ = u.repo.LogTeacherActivity(ctx, teacherID, "Deleted", "Class Session", topicName)
 	u.invalidateCache(ctx, teacherID)
+	u.invalidateNotesCache(ctx)
 	return nil
 }
 
@@ -714,6 +716,7 @@ func (u *teacherUsecase) UploadNote(ctx context.Context, teacherID int64, batchI
 
 	_ = u.repo.LogTeacherActivity(ctx, teacherID, "Uploaded", "Note/Study Material", fmt.Sprintf("%s for Batch %s", title, batchID))
 	u.invalidateCache(ctx, teacherID)
+	u.invalidateNotesCache(ctx)
 
 	return map[string]interface{}{
 		"id":               note.ID,
@@ -734,6 +737,33 @@ func (u *teacherUsecase) invalidateCache(ctx context.Context, teacherID int64) {
 		fmt.Sprintf("teacher_overview_%d*", teacherID),
 		fmt.Sprintf("teacher_batches_%d*", teacherID),
 		fmt.Sprintf("teacher_classes_%d*", teacherID),
+	}
+	for _, pattern := range patterns {
+		var cursor uint64
+		for {
+			keys, nextCursor, err := u.rdb.Scan(ctx, cursor, pattern, 100).Result()
+			if err != nil {
+				break
+			}
+			if len(keys) > 0 {
+				u.rdb.Del(ctx, keys...)
+			}
+			cursor = nextCursor
+			if cursor == 0 {
+				break
+			}
+		}
+	}
+}
+
+func (u *teacherUsecase) invalidateNotesCache(ctx context.Context) {
+	if u.rdb == nil {
+		return
+	}
+	patterns := []string{
+		"notes_list*",
+		"class_notes_list*",
+		"note_detail*",
 	}
 	for _, pattern := range patterns {
 		var cursor uint64
