@@ -269,112 +269,119 @@ func (u *userUsecase) ResendOTP(ctx context.Context, email string) (map[string]i
 	}, nil
 }
 
-func (u *userUsecase) Login(ctx context.Context, emailOrUsername, password, remoteIP string) (map[string]interface{}, error) {
+func (u *userUsecase) Login(ctx context.Context, emailOrUsername, password, remoteIP, role string) (map[string]interface{}, error) {
 	emailOrUsername = strings.TrimSpace(emailOrUsername)
+	role = strings.ToLower(strings.TrimSpace(role))
+
+	checkStudent := role == "" || role == "student"
+	checkAdmin := role == "" || role == "admin"
+	checkTeacher := role == "" || role == "teacher"
 
 	// 1. Try resolving as Student (User)
-	var studentUser *domain.User
-	var err error
-	if strings.Contains(emailOrUsername, "@") {
-		studentUser, err = u.repo.GetUserByEmail(ctx, emailOrUsername)
-	} else {
-		studentUser, err = u.repo.GetUserByUsername(ctx, emailOrUsername)
-	}
-	if err != nil {
-		return nil, err
-	}
+	if checkStudent {
+		var studentUser *domain.User
+		var err error
+		if strings.Contains(emailOrUsername, "@") {
+			studentUser, err = u.repo.GetUserByEmail(ctx, emailOrUsername)
+		} else {
+			studentUser, err = u.repo.GetUserByUsername(ctx, emailOrUsername)
+		}
+		if err == nil && studentUser != nil {
+			ok, err := utils.VerifyDjangoPassword(password, studentUser.Password)
+			if err == nil && ok {
+				tokens, err := utils.GenerateTokenPair(
+					ctx, u.rdb, "student", studentUser.ID, "student", "", u.cfg.SecretKey, 18000, 31536000,
+				)
+				if err != nil {
+					return nil, err
+				}
 
-	if studentUser != nil {
-		ok, err := utils.VerifyDjangoPassword(password, studentUser.Password)
-		if err == nil && ok {
-			tokens, err := utils.GenerateTokenPair(
-				ctx, u.rdb, "student", studentUser.ID, "student", "", u.cfg.SecretKey, 18000, 31536000,
-			)
-			if err != nil {
-				return nil, err
+				profile, err := u.compileStudentProfile(ctx, studentUser)
+				if err != nil {
+					return nil, err
+				}
+
+				return map[string]interface{}{
+					"user":          profile,
+					"access_token":  tokens["access_token"],
+					"refresh_token": tokens["refresh_token"],
+				}, nil
 			}
-
-			profile, err := u.compileStudentProfile(ctx, studentUser)
-			if err != nil {
-				return nil, err
-			}
-
-			return map[string]interface{}{
-				"user":          profile,
-				"access_token":  tokens["access_token"],
-				"refresh_token": tokens["refresh_token"],
-			}, nil
 		}
 	}
 
 	if strings.Contains(emailOrUsername, "@") {
 		// Admin
-		adminUser, err := u.repo.GetAdminByEmail(ctx, emailOrUsername)
-		if err == nil && adminUser != nil {
-			ok, err := utils.VerifyDjangoPassword(password, adminUser.Password)
-			if err == nil && ok {
-				otpCode := generateNumericCode(6)
-				otpKey := fmt.Sprintf("login_otp:%s", adminUser.Email)
-				if u.rdb != nil {
-					_ = u.rdb.Set(ctx, otpKey, otpCode, 5*time.Minute).Err()
-				}
+		if checkAdmin {
+			adminUser, err := u.repo.GetAdminByEmail(ctx, emailOrUsername)
+			if err == nil && adminUser != nil {
+				ok, err := utils.VerifyDjangoPassword(password, adminUser.Password)
+				if err == nil && ok {
+					otpCode := generateNumericCode(6)
+					otpKey := fmt.Sprintf("login_otp:%s", adminUser.Email)
+					if u.rdb != nil {
+						_ = u.rdb.Set(ctx, otpKey, otpCode, 5*time.Minute).Err()
+					}
 
-				err = utils.SendOTPEmail(
-					adminUser.Email,
-					otpCode,
-					strings.Title(strings.Replace(strings.Split(adminUser.Email, "@")[0], ".", " ", -1)),
-					"2fa",
-					u.cfg.DefaultFromEmail,
-					u.cfg.EmailHost,
-					u.cfg.EmailPort,
-					u.cfg.EmailHostUser,
-					u.cfg.EmailHostPassword,
-					300,
-				)
-				if err != nil {
-					return map[string]interface{}{"code": "email_send_failed", "message": "Failed to send verification email. " + err.Error()}, nil
-				}
+					err = utils.SendOTPEmail(
+						adminUser.Email,
+						otpCode,
+						strings.Title(strings.Replace(strings.Split(adminUser.Email, "@")[0], ".", " ", -1)),
+						"2fa",
+						u.cfg.DefaultFromEmail,
+						u.cfg.EmailHost,
+						u.cfg.EmailPort,
+						u.cfg.EmailHostUser,
+						u.cfg.EmailHostPassword,
+						300,
+					)
+					if err != nil {
+						return map[string]interface{}{"code": "email_send_failed", "message": "Failed to send verification email. " + err.Error()}, nil
+					}
 
-				return map[string]interface{}{
-					"require_2fa": true,
-					"email":       adminUser.Email,
-					"role":        "admin",
-				}, nil
+					return map[string]interface{}{
+						"require_2fa": true,
+						"email":       adminUser.Email,
+						"role":        "admin",
+					}, nil
+				}
 			}
 		}
 
 		// Teacher
-		teacherUser, err := u.repo.GetTeacherByEmail(ctx, emailOrUsername)
-		if err == nil && teacherUser != nil {
-			ok, err := utils.VerifyDjangoPassword(password, teacherUser.Password)
-			if err == nil && ok {
-				otpCode := generateNumericCode(6)
-				otpKey := fmt.Sprintf("login_otp:%s", teacherUser.Email)
-				if u.rdb != nil {
-					_ = u.rdb.Set(ctx, otpKey, otpCode, 5*time.Minute).Err()
-				}
+		if checkTeacher {
+			teacherUser, err := u.repo.GetTeacherByEmail(ctx, emailOrUsername)
+			if err == nil && teacherUser != nil {
+				ok, err := utils.VerifyDjangoPassword(password, teacherUser.Password)
+				if err == nil && ok {
+					otpCode := generateNumericCode(6)
+					otpKey := fmt.Sprintf("login_otp:%s", teacherUser.Email)
+					if u.rdb != nil {
+						_ = u.rdb.Set(ctx, otpKey, otpCode, 5*time.Minute).Err()
+					}
 
-				err = utils.SendOTPEmail(
-					teacherUser.Email,
-					otpCode,
-					teacherUser.Name,
-					"2fa",
-					u.cfg.DefaultFromEmail,
-					u.cfg.EmailHost,
-					u.cfg.EmailPort,
-					u.cfg.EmailHostUser,
-					u.cfg.EmailHostPassword,
-					300,
-				)
-				if err != nil {
-					return map[string]interface{}{"code": "email_send_failed", "message": "Failed to send verification email. " + err.Error()}, nil
-				}
+					err = utils.SendOTPEmail(
+						teacherUser.Email,
+						otpCode,
+						teacherUser.Name,
+						"2fa",
+						u.cfg.DefaultFromEmail,
+						u.cfg.EmailHost,
+						u.cfg.EmailPort,
+						u.cfg.EmailHostUser,
+						u.cfg.EmailHostPassword,
+						300,
+					)
+					if err != nil {
+						return map[string]interface{}{"code": "email_send_failed", "message": "Failed to send verification email. " + err.Error()}, nil
+					}
 
-				return map[string]interface{}{
-					"require_2fa": true,
-					"email":       teacherUser.Email,
-					"role":        "teacher",
-				}, nil
+					return map[string]interface{}{
+						"require_2fa": true,
+						"email":       teacherUser.Email,
+						"role":        "teacher",
+					}, nil
+				}
 			}
 		}
 	}

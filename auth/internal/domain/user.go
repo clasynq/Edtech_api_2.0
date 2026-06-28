@@ -184,7 +184,7 @@ type UserUsecase interface {
 	Register(ctx context.Context, fullName, username, email, contact, password, remoteIP string) (map[string]interface{}, error)
 	VerifyOTP(ctx context.Context, email, code string) (map[string]interface{}, error)
 	ResendOTP(ctx context.Context, email string) (map[string]interface{}, error)
-	Login(ctx context.Context, emailOrUsername, password, remoteIP string) (map[string]interface{}, error)
+	Login(ctx context.Context, emailOrUsername, password, remoteIP, role string) (map[string]interface{}, error)
 	VerifyLogin2FA(ctx context.Context, email, code, role string) (map[string]interface{}, error)
 	ForgotPassword(ctx context.Context, email string) (map[string]interface{}, error)
 	ResetPassword(ctx context.Context, email, code, newPassword string) (map[string]interface{}, error)

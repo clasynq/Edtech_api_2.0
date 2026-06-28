@@ -210,6 +210,7 @@ type loginReq struct {
 	Email          string `json:"email" binding:"required"`
 	Password       string `json:"password" binding:"required"`
 	TurnstileToken string `json:"turnstileToken"`
+	Role           string `json:"role"`
 }
 
 func (h *HttpHandler) Login(c *gin.Context) {
@@ -234,7 +235,7 @@ func (h *HttpHandler) Login(c *gin.Context) {
 		return
 	}
 
-	res, err := h.usecase.Login(c.Request.Context(), req.Email, req.Password, remoteIP)
+	res, err := h.usecase.Login(c.Request.Context(), req.Email, req.Password, remoteIP, req.Role)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"detail": err.Error()})
 		return
