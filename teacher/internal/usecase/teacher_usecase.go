@@ -23,6 +23,46 @@ func NewTeacherUsecase(repo domain.TeacherRepository, rdb *redis.Client) domain.
 	return &teacherUsecase{repo: repo, rdb: rdb}
 }
 
+func (u *teacherUsecase) filterSubjectsForTeacher(teacherSubjectsRaw json.RawMessage, teacherID int64, subjects []domain.Subject) ([]string, []map[string]interface{}) {
+	var assignedSubjectIDs []int64
+	hasFilter := false
+	if len(teacherSubjectsRaw) > 0 {
+		var teacherSubjects map[string][]int64
+		if err := json.Unmarshal(teacherSubjectsRaw, &teacherSubjects); err == nil {
+			teacherIDStr := fmt.Sprintf("%d", teacherID)
+			if ids, ok := teacherSubjects[teacherIDStr]; ok {
+				assignedSubjectIDs = ids
+				hasFilter = true
+			}
+		}
+	}
+
+	var subjectNames []string
+	var subjectDetails []map[string]interface{}
+	for _, s := range subjects {
+		if hasFilter {
+			isAssigned := false
+			for _, id := range assignedSubjectIDs {
+				if s.ID == id {
+					isAssigned = true
+					break
+				}
+			}
+			if !isAssigned {
+				continue
+			}
+		}
+
+		subjectNames = append(subjectNames, s.SubjectName)
+		subjectDetails = append(subjectDetails, map[string]interface{}{
+			"id":          s.ID,
+			"subjectName": s.SubjectName,
+			"meetingLink": s.MeetingLink,
+		})
+	}
+	return subjectNames, subjectDetails
+}
+
 func (u *teacherUsecase) GetOverview(ctx context.Context, teacherID int64, category string) (map[string]interface{}, error) {
 	cacheKey := fmt.Sprintf("teacher_overview_%d", teacherID)
 	if category != "" {
@@ -165,16 +205,7 @@ func (u *teacherUsecase) GetOverview(ctx context.Context, teacherID int64, categ
 	var serializedCourses []map[string]interface{}
 	for _, c := range courses {
 		subjects, _ := u.repo.GetSubjectsForCourse(ctx, c.ID)
-		var subjectNames []string
-		var subjectDetails []map[string]interface{}
-		for _, s := range subjects {
-			subjectNames = append(subjectNames, s.SubjectName)
-			subjectDetails = append(subjectDetails, map[string]interface{}{
-				"id":          s.ID,
-				"subjectName": s.SubjectName,
-				"meetingLink": s.MeetingLink,
-			})
-		}
+		subjectNames, subjectDetails := u.filterSubjectsForTeacher(c.TeacherSubjects, teacherID, subjects)
 
 		// Count students in course
 		var count int64
@@ -318,16 +349,7 @@ func (u *teacherUsecase) GetBatches(ctx context.Context, teacherID int64, catego
 	var serialized []map[string]interface{}
 	for _, c := range courses {
 		subjects, _ := u.repo.GetSubjectsForCourse(ctx, c.ID)
-		var subjectNames []string
-		var subjectDetails []map[string]interface{}
-		for _, s := range subjects {
-			subjectNames = append(subjectNames, s.SubjectName)
-			subjectDetails = append(subjectDetails, map[string]interface{}{
-				"id":          s.ID,
-				"subjectName": s.SubjectName,
-				"meetingLink": s.MeetingLink,
-			})
-		}
+		subjectNames, subjectDetails := u.filterSubjectsForTeacher(c.TeacherSubjects, teacherID, subjects)
 
 		// Count students in course
 		enrollments, _ := u.repo.GetEnrollmentsByCourses(ctx, []int64{c.ID})

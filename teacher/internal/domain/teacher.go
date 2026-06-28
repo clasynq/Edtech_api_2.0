@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 )
 
@@ -50,15 +51,16 @@ func (Teacher) TableName() string {
 }
 
 type Course struct {
-	ID            int64     `gorm:"primaryKey;column:id" json:"id"`
-	CourseName    string    `gorm:"column:course_name" json:"courseName"`
-	BatchID       string    `gorm:"column:batch_id" json:"batchId"`
-	Category      string    `gorm:"column:category" json:"category"`
-	TeacherID     *int64    `gorm:"column:teacher_id" json:"teacher"`
-	FinalPrice    float64   `gorm:"column:final_price" json:"finalPrice"`
-	CourseStatus  string    `gorm:"column:course_status" json:"courseStatus"`
-	MeetingLink   string    `gorm:"column:meeting_link" json:"meetingLink"`
-	CreatedAt     time.Time `gorm:"column:created_at" json:"createdAt"`
+	ID              int64           `gorm:"primaryKey;column:id" json:"id"`
+	CourseName      string          `gorm:"column:course_name" json:"courseName"`
+	BatchID         string          `gorm:"column:batch_id" json:"batchId"`
+	Category        string          `gorm:"column:category" json:"category"`
+	TeacherID       *int64          `gorm:"column:teacher_id" json:"teacher"`
+	FinalPrice      float64         `gorm:"column:final_price" json:"finalPrice"`
+	CourseStatus    string          `gorm:"column:course_status" json:"courseStatus"`
+	MeetingLink     string          `gorm:"column:meeting_link" json:"meetingLink"`
+	TeacherSubjects json.RawMessage `gorm:"column:teacher_subjects;type:jsonb" json:"teacherSubjects"`
+	CreatedAt       time.Time       `gorm:"column:created_at" json:"createdAt"`
 	
 	// Join relationship for many-to-many courses_teachers
 	Teachers      []Teacher `gorm:"many2many:courses_teachers;foreignKey:ID;joinForeignKey:course_id;References:ID;joinReferences:teacher_id" json:"-"`
