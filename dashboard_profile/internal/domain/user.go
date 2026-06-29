@@ -126,6 +126,7 @@ func (UserNotification) TableName() string {
 
 type ProfileRepository interface {
 	GetUserByID(ctx context.Context, id int64) (*User, error)
+	IsStudent(ctx context.Context, userID int64) (bool, error)
 	GetStudentReferralsCount(ctx context.Context, userID int64) (int64, error)
 	GetFollowersList(ctx context.Context, userID int64) ([]Follow, error)
 	GetFollowingList(ctx context.Context, userID int64) ([]Follow, error)

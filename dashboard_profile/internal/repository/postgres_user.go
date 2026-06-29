@@ -68,6 +68,34 @@ func (r *postgresProfileRepository) UpdateUser(ctx context.Context, user *domain
 	return r.db.WithContext(ctx).Save(user).Error
 }
 
+func (r *postgresProfileRepository) IsStudent(ctx context.Context, userID int64) (bool, error) {
+	var studentID int64
+	err := r.db.WithContext(ctx).Table("students").Where("user_id = ?", userID).Pluck("id", &studentID).Error
+	if err != nil {
+		return false, err
+	}
+	if studentID == 0 {
+		return false, nil
+	}
+
+	var enrollCount int64
+	if err := r.db.WithContext(ctx).Table("enrollments").Where("student_id = ?", studentID).Count(&enrollCount).Error; err != nil {
+		return false, err
+	}
+
+	var noteCount int64
+	if err := r.db.WithContext(ctx).Table("note_accesses").Where("student_id = ?", studentID).Count(&noteCount).Error; err != nil {
+		return false, err
+	}
+
+	var testCount int64
+	if err := r.db.WithContext(ctx).Table("test_series_accesses").Where("student_id = ?", studentID).Count(&testCount).Error; err != nil {
+		return false, err
+	}
+
+	return (enrollCount + noteCount + testCount) > 0, nil
+}
+
 func (r *postgresProfileRepository) GetTeacherByID(ctx context.Context, id int64) (*domain.Teacher, error) {
 	var teacher domain.Teacher
 	if err := r.db.WithContext(ctx).First(&teacher, id).Error; err != nil {

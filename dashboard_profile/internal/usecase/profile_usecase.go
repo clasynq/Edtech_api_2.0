@@ -20,7 +20,7 @@ func NewProfileUsecase(repo domain.ProfileRepository) domain.ProfileUsecase {
 }
 
 func (u *profileUsecase) GetMe(ctx context.Context, userID int64, role string) (map[string]interface{}, error) {
-	if role == "student" {
+	if role == "student" || role == "user" {
 		user, err := u.repo.GetUserByID(ctx, userID)
 		if err != nil {
 			return nil, err
@@ -175,13 +175,18 @@ func (u *profileUsecase) compileStudentProfile(ctx context.Context, user *domain
 		}
 	}
 
+	role := "user"
+	if isStud, errS := u.repo.IsStudent(ctx, user.ID); errS == nil && isStud {
+		role = "student"
+	}
+
 	return map[string]interface{}{
 		"id":              user.ID,
 		"fullName":        user.FullName,
 		"username":        user.Username,
 		"contactNumber":   user.ContactNumber,
 		"email":           user.Email,
-		"role":            "student",
+		"role":            role,
 		"createdAt":       user.CreatedAt,
 		"followersCount":  len(followers),
 		"followingCount":  len(following),

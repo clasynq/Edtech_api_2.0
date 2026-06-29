@@ -79,9 +79,31 @@ func (r *postgresUserRepository) UpdateUser(ctx context.Context, user *domain.Us
 }
 
 func (r *postgresUserRepository) IsStudent(ctx context.Context, userID int64) (bool, error) {
-	var count int64
-	err := r.db.WithContext(ctx).Model(&domain.Student{}).Where("user_id = ?", userID).Count(&count).Error
-	return count > 0, err
+	var studentID int64
+	err := r.db.WithContext(ctx).Table("students").Where("user_id = ?", userID).Pluck("id", &studentID).Error
+	if err != nil {
+		return false, err
+	}
+	if studentID == 0 {
+		return false, nil
+	}
+
+	var enrollCount int64
+	if err := r.db.WithContext(ctx).Table("enrollments").Where("student_id = ?", studentID).Count(&enrollCount).Error; err != nil {
+		return false, err
+	}
+
+	var noteCount int64
+	if err := r.db.WithContext(ctx).Table("note_accesses").Where("student_id = ?", studentID).Count(&noteCount).Error; err != nil {
+		return false, err
+	}
+
+	var testCount int64
+	if err := r.db.WithContext(ctx).Table("test_series_accesses").Where("student_id = ?", studentID).Count(&testCount).Error; err != nil {
+		return false, err
+	}
+
+	return (enrollCount + noteCount + testCount) > 0, nil
 }
 
 func (r *postgresUserRepository) GetStudentProfile(ctx context.Context, userID int64) (*domain.Student, error) {

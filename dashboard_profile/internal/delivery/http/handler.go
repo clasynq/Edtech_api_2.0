@@ -172,7 +172,7 @@ func (h *HttpHandler) UploadAvatar(c *gin.Context) {
 		return
 	}
 	roleVal, exists := c.Get("role")
-	if exists && roleVal.(string) != "student" {
+	if exists && roleVal.(string) != "student" && roleVal.(string) != "user" {
 		c.JSON(http.StatusForbidden, gin.H{"message": "Worker profiles cannot be edited here."})
 		return
 	}
