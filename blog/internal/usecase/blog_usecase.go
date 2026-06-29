@@ -498,6 +498,22 @@ func (u *blogUsecase) ToggleLike(ctx context.Context, userID, postID int64) (map
 	// Write Activity log
 	u.logActivity(ctx, userID, actType, msg, "/blog/"+post.Slug, "")
 
+	if liked && userID != post.AuthorID {
+		liker, errL := u.repo.GetUserByID(ctx, userID)
+		if errL == nil && liker != nil {
+			msgNotif := fmt.Sprintf("%s liked your article: %s", liker.FullName, post.Title)
+			notif := &domain.UserNotification{
+				RecipientID:      post.AuthorID,
+				RecipientRole:    "student",
+				SenderID:         &userID,
+				NotificationType: "like",
+				Message:          msgNotif,
+				IsRead:           false,
+			}
+			_ = u.repo.CreateNotification(ctx, notif)
+		}
+	}
+
 	return map[string]interface{}{
 		"liked":       liked,
 		"likesCount":  post.LikesCount + likesDiff,
@@ -601,6 +617,22 @@ func (u *blogUsecase) AddComment(ctx context.Context, userID, postID int64, cont
 	// Log activity
 	msg := fmt.Sprintf("Commented on article: %s", post.Title)
 	u.logActivity(ctx, userID, "comment", msg, "/blog/"+post.Slug, content)
+
+	if userID != post.AuthorID {
+		commenter, errC := u.repo.GetUserByID(ctx, userID)
+		if errC == nil && commenter != nil {
+			msgNotif := fmt.Sprintf("%s commented on your article: %s", commenter.FullName, post.Title)
+			notif := &domain.UserNotification{
+				RecipientID:      post.AuthorID,
+				RecipientRole:    "student",
+				SenderID:         &userID,
+				NotificationType: "comment",
+				Message:          msgNotif,
+				IsRead:           false,
+			}
+			_ = u.repo.CreateNotification(ctx, notif)
+		}
+	}
 
 	u.invalidateBlogCache(ctx, post.Slug)
 	return map[string]interface{}{

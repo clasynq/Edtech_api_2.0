@@ -380,7 +380,7 @@ func (r *postgresBlogRepository) ToggleFollowUser(ctx context.Context, followerI
 }
 
 func (r *postgresBlogRepository) CreateNotification(ctx context.Context, notif *domain.UserNotification) error {
-	return r.db.WithContext(ctx).Create(notif).Error
+	return r.db.WithContext(ctx).Omit("Sender").Create(notif).Error
 }
 
 func (r *postgresBlogRepository) GetUserRole(ctx context.Context, userID int64) (string, error) {
@@ -395,5 +395,16 @@ func (r *postgresBlogRepository) GetUserRole(ctx context.Context, userID int64) 
 	}
 	// Default to student
 	return "student", nil
+}
+
+func (r *postgresBlogRepository) GetUserByID(ctx context.Context, id int64) (*domain.User, error) {
+	var user domain.User
+	if err := r.db.WithContext(ctx).First(&user, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &user, nil
 }
 

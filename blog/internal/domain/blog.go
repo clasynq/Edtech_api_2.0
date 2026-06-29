@@ -189,6 +189,7 @@ type BlogRepository interface {
 	ToggleFollowUser(ctx context.Context, followerID, followedID int64) (bool, error)
 	CreateNotification(ctx context.Context, notif *UserNotification) error
 	GetUserRole(ctx context.Context, userID int64) (string, error)
+	GetUserByID(ctx context.Context, id int64) (*User, error)
 
 	// Admin Queries
 	GetAdminPosts(ctx context.Context, query string, userSearch string, limit int) ([]BlogPost, error)
