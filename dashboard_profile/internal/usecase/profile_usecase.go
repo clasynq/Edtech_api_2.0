@@ -279,16 +279,6 @@ func (u *profileUsecase) ToggleFollowUser(ctx context.Context, followerID, follo
 
 		if followerName != "" {
 			followedRole := "student"
-			teacher, errT := u.repo.GetTeacherByID(ctx, followedID)
-			if errT == nil && teacher != nil {
-				followedRole = "teacher"
-			} else {
-				admin, errA := u.repo.GetAdminByID(ctx, followedID)
-				if errA == nil && admin != nil {
-					followedRole = "admin"
-				}
-			}
-
 			msg := fmt.Sprintf("%s started following you.", followerName)
 			notif := domain.UserNotification{
 				RecipientID:      followedID,

@@ -811,18 +811,15 @@ func (u *blogUsecase) TrackPostView(ctx context.Context, postID int64, viewerIde
 
 		// Milestone Notification for every 100 views
 		if post.ViewsCount > 0 && post.ViewsCount % 100 == 0 {
-			authorRole, errR := u.repo.GetUserRole(ctx, post.AuthorID)
-			if errR == nil {
-				msg := fmt.Sprintf("Your article \"%s\" has reached %d views!", post.Title, post.ViewsCount)
-				notif := &domain.UserNotification{
-					RecipientID:      post.AuthorID,
-					RecipientRole:    authorRole,
-					NotificationType: "milestone",
-					Message:          msg,
-					IsRead:           false,
-				}
-				_ = u.repo.CreateNotification(ctx, notif)
+			msg := fmt.Sprintf("Your article \"%s\" has reached %d views!", post.Title, post.ViewsCount)
+			notif := &domain.UserNotification{
+				RecipientID:      post.AuthorID,
+				RecipientRole:    "student",
+				NotificationType: "milestone",
+				Message:          msg,
+				IsRead:           false,
 			}
+			_ = u.repo.CreateNotification(ctx, notif)
 		}
 	} else {
 		latestView.ViewedAt = time.Now()
