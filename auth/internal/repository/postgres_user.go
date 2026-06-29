@@ -280,10 +280,14 @@ func (r *postgresUserRepository) GetFollowingList(ctx context.Context, userID in
 	err := r.db.WithContext(ctx).Preload("Followed").Where("follower_id = ?", userID).Find(&follows).Error
 	return follows, err
 }
-
 func (r *postgresUserRepository) GetNotifications(ctx context.Context, userID int64, role string) ([]domain.UserNotification, error) {
 	var notifications []domain.UserNotification
-	err := r.db.WithContext(ctx).Preload("Sender").Where("recipient_id = ? AND recipient_role = ?", userID, role).Order("created_at desc").Find(&notifications).Error
+	var err error
+	if role == "student" || role == "user" {
+		err = r.db.WithContext(ctx).Preload("Sender").Where("recipient_id = ? AND recipient_role IN ('student', 'user')", userID).Order("created_at desc").Find(&notifications).Error
+	} else {
+		err = r.db.WithContext(ctx).Preload("Sender").Where("recipient_id = ? AND recipient_role = ?", userID, role).Order("created_at desc").Find(&notifications).Error
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -324,6 +328,9 @@ func (r *postgresUserRepository) GetNotifications(ctx context.Context, userID in
 }
 
 func (r *postgresUserRepository) MarkNotificationsAsRead(ctx context.Context, userID int64, role string) error {
+	if role == "student" || role == "user" {
+		return r.db.WithContext(ctx).Model(&domain.UserNotification{}).Where("recipient_id = ? AND recipient_role IN ('student', 'user')", userID).Update("is_read", true).Error
+	}
 	return r.db.WithContext(ctx).Model(&domain.UserNotification{}).Where("recipient_id = ? AND recipient_role = ?", userID, role).Update("is_read", true).Error
 }
 
