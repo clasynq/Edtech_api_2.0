@@ -396,6 +396,7 @@ func (u *profileUsecase) GetStudyDashboard(ctx context.Context, userID int64, ca
 
 	upcomingClasses := make([]map[string]interface{}, 0)
 	var liveClass map[string]interface{}
+	todayClasses := make([]map[string]interface{}, 0)
 
 	for _, s := range schedules {
 		tDate := time.Time(s.ClassDate)
@@ -494,6 +495,7 @@ func (u *profileUsecase) GetStudyDashboard(ctx context.Context, userID int64, ca
 			if liveClass == nil {
 				liveClass = classInfo
 			}
+			todayClasses = append(todayClasses, classInfo)
 		}
 
 		upcomingClasses = append(upcomingClasses, classInfo)
@@ -503,6 +505,7 @@ func (u *profileUsecase) GetStudyDashboard(ctx context.Context, userID int64, ca
 		"enrolledCourses": coursesData,
 		"upcomingClasses": upcomingClasses,
 		"liveClass":       liveClass,
+		"todayClasses":    todayClasses,
 	}, nil
 }
 
