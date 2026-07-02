@@ -90,6 +90,7 @@ type NoteRepository interface {
 	GetImportantNotes(ctx context.Context, batchIDs []string) ([]ImportantNote, error)
 	GetImportantNotesAdmin(ctx context.Context, batchID string) ([]ImportantNote, error)
 	GetBatchesByStudentID(ctx context.Context, studentID int64) ([]string, error)
+	GetImportantNoteByID(ctx context.Context, id int64) (*ImportantNote, error)
 }
 
 type NoteUsecase interface {
@@ -105,6 +106,7 @@ type NoteUsecase interface {
 	CreateImportantNote(ctx context.Context, note *ImportantNote) error
 	DeleteImportantNote(ctx context.Context, id int64) error
 	GetImportantNotes(ctx context.Context, userID int64, role string, batchID string) ([]ImportantNote, error)
+	GetImportantNoteByID(ctx context.Context, userID int64, role string, id int64) (*ImportantNote, error)
 }
 
 type ImportantNote struct {

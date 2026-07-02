@@ -488,3 +488,40 @@ func (u *noteUsecase) GetImportantNotes(ctx context.Context, userID int64, role 
 	// For admin/teacher
 	return u.repo.GetImportantNotesAdmin(ctx, batchID)
 }
+
+func (u *noteUsecase) GetImportantNoteByID(ctx context.Context, userID int64, role string, id int64) (*domain.ImportantNote, error) {
+	note, err := u.repo.GetImportantNoteByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if note == nil {
+		return nil, errors.New("note not found")
+	}
+
+	// For students, check batch authorization
+	if role == "student" {
+		student, err := u.repo.GetStudentByUserID(ctx, userID)
+		if err != nil {
+			return nil, err
+		}
+		if student == nil {
+			return nil, errors.New("student profile not found")
+		}
+		batches, err := u.repo.GetBatchesByStudentID(ctx, student.ID)
+		if err != nil {
+			return nil, err
+		}
+		hasAccess := false
+		for _, b := range batches {
+			if b == note.BatchID {
+				hasAccess = true
+				break
+			}
+		}
+		if !hasAccess {
+			return nil, errors.New("unauthorized batch access to this note")
+		}
+	}
+
+	return note, nil
+}

@@ -307,3 +307,15 @@ func (r *postgresNoteRepository) GetBatchesByStudentID(ctx context.Context, stud
 		Pluck("courses.batch_id", &batchIDs).Error
 	return batchIDs, err
 }
+
+func (r *postgresNoteRepository) GetImportantNoteByID(ctx context.Context, id int64) (*domain.ImportantNote, error) {
+	var note domain.ImportantNote
+	err := r.db.WithContext(ctx).First(&note, id).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &note, nil
+}

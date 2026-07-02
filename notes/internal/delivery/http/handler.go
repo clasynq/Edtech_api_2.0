@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"clasynq/api/notes/internal/domain"
@@ -67,6 +68,8 @@ func RegisterRoutes(
 		auth.DELETE("/important/:id/", AdminOrTeacherRequired(), handler.DeleteImportantNote)
 		auth.GET("/important", handler.GetImportantNotes)
 		auth.GET("/important/", handler.GetImportantNotes)
+		auth.GET("/important/:id/download", handler.DownloadImportantNote)
+		auth.GET("/important/:id/download/", handler.DownloadImportantNote)
 	}
 }
 
@@ -605,4 +608,50 @@ func (h *httpHandler) GetImportantNotes(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, notes)
+}
+
+func (h *httpHandler) DownloadImportantNote(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "invalid ID"})
+		return
+	}
+
+	userID := int64(0)
+	role := ""
+	if uIDVal, exists := c.Get("userID"); exists {
+		userID = uIDVal.(int64)
+	}
+	if rVal, exists := c.Get("role"); exists {
+		role = rVal.(string)
+	}
+
+	note, err := h.uc.GetImportantNoteByID(c.Request.Context(), userID, role, id)
+	if err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"detail": err.Error()})
+		return
+	}
+
+	// Extract filename from file_url (e.g. http://host/media/important_notes/123_file.pdf)
+	parts := strings.Split(note.FileURL, "/")
+	if len(parts) == 0 {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "invalid file URL"})
+		return
+	}
+	filename := parts[len(parts)-1]
+
+	localPath := filepath.Join(h.mediaRoot, "important_notes", filename)
+
+	// Get the original clean filename (drop the timestamp prefix if possible)
+	cleanName := filename
+	if idx := strings.Index(filename, "_"); idx != -1 {
+		cleanName = filename[idx+1:]
+	}
+
+	c.Header("Content-Description", "File Transfer")
+	c.Header("Content-Transfer-Encoding", "binary")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", cleanName))
+	c.Header("Content-Type", "application/octet-stream")
+	c.File(localPath)
 }
