@@ -63,6 +63,7 @@ func main() {
 	log.Println("Running database migrations...")
 	migrations := []string{
 		"CREATE TABLE IF NOT EXISTS imp_notes (id BIGSERIAL PRIMARY KEY, title VARCHAR(255) NOT NULL, description TEXT NOT NULL, batch_id VARCHAR(50) NOT NULL, file_url TEXT NOT NULL, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
+		"ALTER TABLE imp_notes ADD COLUMN IF NOT EXISTS video_url text",
 		"ALTER TABLE notes ADD COLUMN IF NOT EXISTS recorded_class_url text",
 		"ALTER TABLE notes ADD COLUMN IF NOT EXISTS subject varchar(255)",
 		"ALTER TABLE notes ADD COLUMN IF NOT EXISTS topic varchar(255)",

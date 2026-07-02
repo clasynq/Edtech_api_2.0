@@ -113,6 +113,7 @@ type ImportantNote struct {
 	Description string    `gorm:"column:description;type:text;not null" json:"description"`
 	BatchID     string    `gorm:"column:batch_id;type:varchar(50);not null" json:"batchId"`
 	FileURL     string    `gorm:"column:file_url;type:text;not null" json:"fileUrl"`
+	VideoURL    string    `gorm:"column:video_url;type:text" json:"videoUrl"`
 	CreatedAt   time.Time `gorm:"column:created_at;type:timestamp with time zone;autoCreateTime" json:"createdAt"`
 	UpdatedAt   time.Time `gorm:"column:updated_at;type:timestamp with time zone;autoUpdateTime" json:"updatedAt"`
 }

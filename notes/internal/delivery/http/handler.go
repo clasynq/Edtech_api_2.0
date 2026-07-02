@@ -545,12 +545,17 @@ func (h *httpHandler) CreateImportantNote(c *gin.Context) {
 	}
 
 	fileURL := fmt.Sprintf("%s/media/important_notes/%s", h.baseURL, filename)
+	videoURL := c.PostForm("videoUrl")
+	if videoURL == "" {
+		videoURL = c.PostForm("video_url")
+	}
 
 	note := &domain.ImportantNote{
 		Title:       title,
 		Description: description,
 		BatchID:     batchID,
 		FileURL:     fileURL,
+		VideoURL:    videoURL,
 	}
 
 	if err := h.uc.CreateImportantNote(c.Request.Context(), note); err != nil {
