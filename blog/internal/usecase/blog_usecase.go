@@ -472,7 +472,7 @@ func (u *blogUsecase) ToggleLike(ctx context.Context, userID, postID int64) (map
 
 	if u.rdb != nil {
 		limitKey := fmt.Sprintf("blog_like_limit:%d:%d", userID, postID)
-		success, err := u.rdb.SetNX(ctx, limitKey, "1", 1500*time.Millisecond).Result()
+		success, err := u.rdb.SetNX(ctx, limitKey, "1", 300*time.Millisecond).Result()
 		if err == nil && !success {
 			return nil, errors.New("Please wait a moment before updating your reaction.")
 		}

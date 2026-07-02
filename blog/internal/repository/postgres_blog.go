@@ -166,6 +166,7 @@ func (r *postgresBlogRepository) GetMutualConnectionWeights(ctx context.Context,
 
 func (r *postgresBlogRepository) ToggleLike(ctx context.Context, userID, postID int64) (bool, error) {
 	var like domain.BlogLike
+	isCreated := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		res := tx.Where("user_id = ? AND post_id = ?", userID, postID).First(&like)
 		if res.Error == nil {
@@ -183,6 +184,7 @@ func (r *postgresBlogRepository) ToggleLike(ctx context.Context, userID, postID 
 			if err := tx.Create(&like).Error; err != nil {
 				return err
 			}
+			isCreated = true
 			return nil
 		}
 		return res.Error
@@ -192,8 +194,7 @@ func (r *postgresBlogRepository) ToggleLike(ctx context.Context, userID, postID 
 		return false, err
 	}
 
-	// If like.ID > 0, it means we just created it (liked)
-	return like.ID > 0, nil
+	return isCreated, nil
 }
 
 func (r *postgresBlogRepository) ToggleSave(ctx context.Context, userID, postID int64) (bool, error) {
