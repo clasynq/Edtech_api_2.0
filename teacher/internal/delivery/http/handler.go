@@ -48,6 +48,8 @@ func (h *HttpHandler) RegisterRoutes(r *gin.Engine, authMiddleware gin.HandlerFu
 			teacher.PATCH("/classes/:id", h.UpdateClass)
 			teacher.DELETE("/classes/:id", h.DeleteClass)
 			teacher.POST("/notes", h.UploadNote)
+			teacher.POST("/notice", h.PublishNotice)
+			teacher.POST("/notice/", h.PublishNotice)
 		}
 	}
 }
@@ -362,4 +364,26 @@ func (h *HttpHandler) saveFileLocally(c *gin.Context, formFieldName, folder stri
 	relPath := filepath.ToSlash(filepath.Join(folder, filename))
 	baseMediaURL := strings.TrimSuffix(h.baseURL, "/")
 	return fmt.Sprintf("%s/media/%s", baseMediaURL, relPath), nil
+}
+
+func (h *HttpHandler) PublishNotice(c *gin.Context) {
+	teacherID := c.MustGet("userID").(int64)
+
+	var body struct {
+		BatchID string `json:"batch_id"`
+		Message string `json:"message" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "message is required."})
+		return
+	}
+
+	res, err := h.usecase.SendNotice(c.Request.Context(), teacherID, body.BatchID, body.Message)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, res)
 }

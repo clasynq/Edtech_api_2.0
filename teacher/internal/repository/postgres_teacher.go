@@ -215,6 +215,10 @@ func (r *postgresTeacherRepository) GetCourseByBatchID(ctx context.Context, batc
 	return &course, err
 }
 
+func (r *postgresTeacherRepository) CreateNotification(ctx context.Context, notif *domain.UserNotification) error {
+	return r.db.WithContext(ctx).Create(notif).Error
+}
+
 func parseCategories(catStr string) []string {
 	var list []string
 	parts := strings.Split(catStr, ",")

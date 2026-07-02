@@ -1050,3 +1050,110 @@ func (u *teacherUsecase) GetCategories(ctx context.Context, teacherID int64) ([]
 	}
 	return list, nil
 }
+
+func (u *teacherUsecase) SendNotice(ctx context.Context, teacherID int64, batchID, message string) (map[string]interface{}, error) {
+	teacher, err := u.repo.GetTeacherByID(ctx, teacherID)
+	if err != nil {
+		return nil, err
+	}
+	if teacher == nil {
+		return nil, errors.New("teacher not found")
+	}
+
+	if strings.TrimSpace(message) == "" {
+		return nil, errors.New("notice message cannot be empty")
+	}
+
+	var courses []domain.Course
+	if batchID != "" && strings.ToLower(batchID) != "all" {
+		course, err := u.repo.GetCourseByBatchID(ctx, batchID)
+		if err != nil {
+			return nil, err
+		}
+		if course == nil {
+			return nil, errors.New("batch not found")
+		}
+		// Verify if this teacher is assigned to this course
+		isAssigned := false
+		if course.TeacherID != nil && *course.TeacherID == teacher.ID {
+			isAssigned = true
+		} else {
+			assignedCourses, err := u.repo.GetCoursesByTeacher(ctx, teacherID, "")
+			if err == nil {
+				for _, ac := range assignedCourses {
+					if ac.ID == course.ID {
+						isAssigned = true
+						break
+					}
+				}
+			}
+		}
+		if !isAssigned {
+			return nil, errors.New("you are not authorized to send a notice to this batch")
+		}
+		courses = append(courses, *course)
+	} else {
+		// Get all courses assigned to this teacher
+		courses, err = u.repo.GetCoursesByTeacher(ctx, teacherID, "")
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if len(courses) == 0 {
+		return nil, errors.New("no assigned courses/batches found to send notice to")
+	}
+
+	// Get student enrollments for these courses
+	var courseIDs []int64
+	for _, c := range courses {
+		courseIDs = append(courseIDs, c.ID)
+	}
+
+	enrollments, err := u.repo.GetEnrollmentsByCourses(ctx, courseIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	// Broadcast to unique users
+	recipientUserIDs := make(map[int64]bool)
+	for _, e := range enrollments {
+		if e.Student.UserID != 0 {
+			recipientUserIDs[e.Student.UserID] = true
+		}
+	}
+
+	if len(recipientUserIDs) == 0 {
+		return map[string]interface{}{"message": "Notice created, but no students are enrolled in these batches yet.", "sent_count": 0}, nil
+	}
+
+	// Create notifications
+	sentCount := 0
+	for uID := range recipientUserIDs {
+		notif := &domain.UserNotification{
+			RecipientID:      uID,
+			SenderID:         &teacher.ID,
+			IsRead:           false,
+			NotificationType: "notice",
+			Message:          fmt.Sprintf("Notice from %s: %s", teacher.Name, message),
+			RecipientRole:    "student",
+			CreatedAt:        time.Now(),
+		}
+		err = u.repo.CreateNotification(ctx, notif)
+		if err == nil {
+			sentCount++
+		}
+	}
+
+	// Log teacher activity
+	batchLabel := batchID
+	if batchID == "" || strings.ToLower(batchID) == "all" {
+		batchLabel = "all assigned batches"
+	}
+	_ = u.repo.LogTeacherActivity(ctx, teacherID, "published a notice", "Notice", batchLabel)
+
+	return map[string]interface{}{
+		"message":    fmt.Sprintf("Notice successfully sent to %d student(s).", sentCount),
+		"sent_count": sentCount,
+	}, nil
+}

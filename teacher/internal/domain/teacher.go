@@ -164,6 +164,9 @@ type TeacherRepository interface {
 	// Note uploads
 	CreateNote(ctx context.Context, note *Note) error
 	GetCourseByBatchID(ctx context.Context, batchID string) (*Course, error)
+
+	// Notifications
+	CreateNotification(ctx context.Context, notif *UserNotification) error
 }
 
 type TeacherUsecase interface {
@@ -176,6 +179,7 @@ type TeacherUsecase interface {
 	DeleteClass(ctx context.Context, teacherID, classID int64) error
 	UploadNote(ctx context.Context, teacherID int64, batchID, title, fileURL, recordedClassURL, subject, topic, prerequisiteURL, description string) (map[string]interface{}, error)
 	GetCategories(ctx context.Context, teacherID int64) ([]string, error)
+	SendNotice(ctx context.Context, teacherID int64, batchID, message string) (map[string]interface{}, error)
 }
 
 type Note struct {
@@ -200,5 +204,20 @@ type Note struct {
 
 func (Note) TableName() string {
 	return "notes"
+}
+
+type UserNotification struct {
+	ID               int64     `gorm:"primaryKey;column:id" json:"id"`
+	CreatedAt        time.Time `gorm:"column:created_at;autoCreateTime" json:"createdAt"`
+	RecipientID      int64     `gorm:"column:recipient_id;not null" json:"recipientId"`
+	SenderID         *int64    `gorm:"column:sender_id" json:"senderId"`
+	IsRead           bool      `gorm:"column:is_read;default:false" json:"isRead"`
+	NotificationType string    `gorm:"column:notification_type;type:varchar(50)" json:"notificationType"`
+	Message          string    `gorm:"column:message;type:text" json:"message"`
+	RecipientRole    string    `gorm:"column:recipient_role;type:varchar(50)" json:"recipientRole"`
+}
+
+func (UserNotification) TableName() string {
+	return "user_notifications"
 }
 
