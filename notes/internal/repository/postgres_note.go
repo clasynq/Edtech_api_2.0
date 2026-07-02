@@ -270,3 +270,40 @@ func (r *postgresNoteRepository) GetNoteAccesses(ctx context.Context, studentID 
 		Pluck("note_id", &noteIDs).Error
 	return noteIDs, err
 }
+
+func (r *postgresNoteRepository) CreateImportantNote(ctx context.Context, note *domain.ImportantNote) error {
+	return r.db.WithContext(ctx).Create(note).Error
+}
+
+func (r *postgresNoteRepository) DeleteImportantNote(ctx context.Context, id int64) error {
+	return r.db.WithContext(ctx).Delete(&domain.ImportantNote{}, id).Error
+}
+
+func (r *postgresNoteRepository) GetImportantNotes(ctx context.Context, batchIDs []string) ([]domain.ImportantNote, error) {
+	var notes []domain.ImportantNote
+	if len(batchIDs) == 0 {
+		return notes, nil
+	}
+	err := r.db.WithContext(ctx).Where("batch_id IN ?", batchIDs).Order("created_at DESC").Find(&notes).Error
+	return notes, err
+}
+
+func (r *postgresNoteRepository) GetImportantNotesAdmin(ctx context.Context, batchID string) ([]domain.ImportantNote, error) {
+	var notes []domain.ImportantNote
+	query := r.db.WithContext(ctx)
+	if batchID != "" {
+		query = query.Where("batch_id = ?", batchID)
+	}
+	err := query.Order("created_at DESC").Find(&notes).Error
+	return notes, err
+}
+
+func (r *postgresNoteRepository) GetBatchesByStudentID(ctx context.Context, studentID int64) ([]string, error) {
+	var batchIDs []string
+	err := r.db.WithContext(ctx).Table("enrollments").
+		Select("DISTINCT courses.batch_id").
+		Joins("JOIN courses ON enrollments.course_id = courses.id").
+		Where("enrollments.student_id = ?", studentID).
+		Pluck("courses.batch_id", &batchIDs).Error
+	return batchIDs, err
+}

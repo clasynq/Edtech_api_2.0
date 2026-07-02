@@ -59,6 +59,14 @@ func RegisterRoutes(
 		auth.PUT("/:id", AdminOrTeacherRequired(), handler.UpdateNote)
 		auth.DELETE("/:id", AdminOrTeacherRequired(), handler.DeleteNote)
 		auth.GET("/:id/access", handler.CheckAccess)
+
+		// Important Notes
+		auth.POST("/important", AdminOrTeacherRequired(), handler.CreateImportantNote)
+		auth.POST("/important/", AdminOrTeacherRequired(), handler.CreateImportantNote)
+		auth.DELETE("/important/:id", AdminOrTeacherRequired(), handler.DeleteImportantNote)
+		auth.DELETE("/important/:id/", AdminOrTeacherRequired(), handler.DeleteImportantNote)
+		auth.GET("/important", handler.GetImportantNotes)
+		auth.GET("/important/", handler.GetImportantNotes)
 	}
 }
 
@@ -494,6 +502,98 @@ func (h *httpHandler) GetAdminNotes(c *gin.Context) {
 	}
 
 	notes, err := h.uc.GetNotes(c.Request.Context(), userID, role, filters)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, notes)
+}
+
+func (h *httpHandler) CreateImportantNote(c *gin.Context) {
+	title := c.PostForm("title")
+	description := c.PostForm("description")
+	batchID := c.PostForm("batchId")
+	if batchID == "" {
+		batchID = c.PostForm("batch_id")
+	}
+
+	if title == "" || batchID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "title and batchId are required"})
+		return
+	}
+
+	file, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "file is required"})
+		return
+	}
+
+	// 1. Create target directory
+	notesDir := filepath.Join(h.mediaRoot, "important_notes")
+	if err := os.MkdirAll(notesDir, 0755); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": fmt.Sprintf("failed to create directory: %v", err)})
+		return
+	}
+
+	// 2. Save file
+	filename := fmt.Sprintf("%d_%s", time.Now().UnixNano(), file.Filename)
+	dest := filepath.Join(notesDir, filename)
+	if err := c.SaveUploadedFile(file, dest); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": fmt.Sprintf("failed to save file: %v", err)})
+		return
+	}
+
+	fileURL := fmt.Sprintf("%s/media/important_notes/%s", h.baseURL, filename)
+
+	note := &domain.ImportantNote{
+		Title:       title,
+		Description: description,
+		BatchID:     batchID,
+		FileURL:     fileURL,
+	}
+
+	if err := h.uc.CreateImportantNote(c.Request.Context(), note); err != nil {
+		_ = os.Remove(dest)
+		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, note)
+}
+
+func (h *httpHandler) DeleteImportantNote(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "invalid ID"})
+		return
+	}
+
+	if err := h.uc.DeleteImportantNote(c.Request.Context(), id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Important note deleted successfully"})
+}
+
+func (h *httpHandler) GetImportantNotes(c *gin.Context) {
+	userID := int64(0)
+	role := ""
+	if uIDVal, exists := c.Get("userID"); exists {
+		userID = uIDVal.(int64)
+	}
+	if rVal, exists := c.Get("role"); exists {
+		role = rVal.(string)
+	}
+
+	batchID := c.Query("batchId")
+	if batchID == "" {
+		batchID = c.Query("batch_id")
+	}
+
+	notes, err := h.uc.GetImportantNotes(c.Request.Context(), userID, role, batchID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
 		return

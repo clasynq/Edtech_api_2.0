@@ -453,3 +453,38 @@ func (u *noteUsecase) invalidateCache(ctx context.Context, patterns ...string) {
 func (u *noteUsecase) invalidateNotesCache(ctx context.Context) {
 	u.invalidateCache(ctx, "notes_list*", "class_notes_list*", "note_detail*")
 }
+
+func (u *noteUsecase) CreateImportantNote(ctx context.Context, note *domain.ImportantNote) error {
+	if note.Title == "" || note.BatchID == "" || note.FileURL == "" {
+		return errors.New("title, batchId, and fileUrl are required")
+	}
+	return u.repo.CreateImportantNote(ctx, note)
+}
+
+func (u *noteUsecase) DeleteImportantNote(ctx context.Context, id int64) error {
+	return u.repo.DeleteImportantNote(ctx, id)
+}
+
+func (u *noteUsecase) GetImportantNotes(ctx context.Context, userID int64, role string, batchID string) ([]domain.ImportantNote, error) {
+	if role == "student" {
+		student, err := u.repo.GetStudentByUserID(ctx, userID)
+		if err != nil {
+			return nil, err
+		}
+		if student == nil {
+			return nil, errors.New("student profile not found")
+		}
+		// Resolve enrolled batches for the student
+		batches, err := u.repo.GetBatchesByStudentID(ctx, student.ID)
+		if err != nil {
+			return nil, err
+		}
+		if len(batches) == 0 {
+			return []domain.ImportantNote{}, nil
+		}
+		return u.repo.GetImportantNotes(ctx, batches)
+	}
+
+	// For admin/teacher
+	return u.repo.GetImportantNotesAdmin(ctx, batchID)
+}

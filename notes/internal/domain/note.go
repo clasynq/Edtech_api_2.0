@@ -83,6 +83,13 @@ type NoteRepository interface {
 	HasNoteAccess(ctx context.Context, studentID, noteID int64) (bool, error)
 	IsStudentEnrolledInCourse(ctx context.Context, studentID, courseID int64) (bool, error)
 	GetNoteAccesses(ctx context.Context, studentID int64) ([]int64, error)
+
+	// Important Notes
+	CreateImportantNote(ctx context.Context, note *ImportantNote) error
+	DeleteImportantNote(ctx context.Context, id int64) error
+	GetImportantNotes(ctx context.Context, batchIDs []string) ([]ImportantNote, error)
+	GetImportantNotesAdmin(ctx context.Context, batchID string) ([]ImportantNote, error)
+	GetBatchesByStudentID(ctx context.Context, studentID int64) ([]string, error)
 }
 
 type NoteUsecase interface {
@@ -93,4 +100,23 @@ type NoteUsecase interface {
 	UpdateNote(ctx context.Context, idOrSlug string, updates map[string]interface{}) (*Note, error)
 	DeleteNote(ctx context.Context, idOrSlug string) error
 	HasAccess(ctx context.Context, userID int64, role string, noteIDOrSlug string) (bool, error)
+
+	// Important Notes
+	CreateImportantNote(ctx context.Context, note *ImportantNote) error
+	DeleteImportantNote(ctx context.Context, id int64) error
+	GetImportantNotes(ctx context.Context, userID int64, role string, batchID string) ([]ImportantNote, error)
+}
+
+type ImportantNote struct {
+	ID          int64     `gorm:"primaryKey;column:id" json:"id"`
+	Title       string    `gorm:"column:title;type:varchar(255);not null" json:"title"`
+	Description string    `gorm:"column:description;type:text;not null" json:"description"`
+	BatchID     string    `gorm:"column:batch_id;type:varchar(50);not null" json:"batchId"`
+	FileURL     string    `gorm:"column:file_url;type:text;not null" json:"fileUrl"`
+	CreatedAt   time.Time `gorm:"column:created_at;type:timestamp with time zone;autoCreateTime" json:"createdAt"`
+	UpdatedAt   time.Time `gorm:"column:updated_at;type:timestamp with time zone;autoUpdateTime" json:"updatedAt"`
+}
+
+func (ImportantNote) TableName() string {
+	return "imp_notes"
 }
