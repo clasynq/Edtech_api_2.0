@@ -317,7 +317,19 @@ func (r *postgresUserRepository) GetNotifications(ctx context.Context, userID in
 	for i := range notifications {
 		if notifications[i].SenderID != nil {
 			senderID := *notifications[i].SenderID
-			if notifications[i].Sender != nil {
+			if notifications[i].NotificationType == "notice" {
+				// Notices are always sent by teachers. Retrieve details from teachers table directly to avoid ID clashes with users.
+				var teacher struct {
+					Name     string
+					PhotoURL string
+				}
+				if errT := r.db.WithContext(ctx).Table("teachers").Select("name, photo_url").Where("id = ?", senderID).First(&teacher).Error; errT == nil {
+					notifications[i].SenderName = teacher.Name
+					notifications[i].SenderAvatarUrl = teacher.PhotoURL
+				} else {
+					notifications[i].SenderName = "Teacher"
+				}
+			} else if notifications[i].Sender != nil {
 				notifications[i].SenderName = notifications[i].Sender.FullName
 				notifications[i].SenderAvatarUrl = notifications[i].Sender.AvatarURL
 			} else {
