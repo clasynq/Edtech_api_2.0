@@ -70,8 +70,7 @@ func (u *enrollmentUsecase) ValidateReferral(ctx context.Context, buyerID int64,
 
 	// 2. Anti-fraud: Personal info matching
 	if strings.ToLower(strings.TrimSpace(buyer.Email)) == strings.ToLower(strings.TrimSpace(referrer.Email)) ||
-		strings.ToLower(strings.TrimSpace(buyer.ContactNumber)) == strings.ToLower(strings.TrimSpace(referrer.ContactNumber)) ||
-		strings.ToLower(strings.TrimSpace(buyer.FullName)) == strings.ToLower(strings.TrimSpace(referrer.FullName)) {
+		strings.ToLower(strings.TrimSpace(buyer.ContactNumber)) == strings.ToLower(strings.TrimSpace(referrer.ContactNumber)) {
 		return map[string]interface{}{"valid": false, "message": "Anti-fraud validation failed: User details match the referrer"}, nil
 	}
 
