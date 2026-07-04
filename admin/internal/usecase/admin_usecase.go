@@ -614,6 +614,7 @@ func (u *adminUsecase) GetSalesAnalysis(ctx context.Context, monthStr, category 
 			"price":                   c.Price,
 			"totalMonthEnrollments":  monthlyCourseSales,
 			"weeklyBreakdown":         weeklyBreakdown,
+			"revenue":                 c.Revenue,
 		}
 	}
 
@@ -654,6 +655,7 @@ func (u *adminUsecase) GetSalesAnalysis(ctx context.Context, monthStr, category 
 			"price":              n.Price,
 			"totalMonthSales":    monthlyNoteSales,
 			"weeklyBreakdown":    weeklyBreakdown,
+			"revenue":            n.Revenue,
 		}
 	}
 
@@ -694,6 +696,7 @@ func (u *adminUsecase) GetSalesAnalysis(ctx context.Context, monthStr, category 
 			"price":              ts.Price,
 			"totalMonthSales":    monthlyTsSales,
 			"weeklyBreakdown":    weeklyBreakdown,
+			"revenue":            ts.Revenue,
 		}
 	}
 

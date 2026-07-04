@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net"
 	"strings"
 	"time"
 
@@ -55,6 +56,23 @@ func (u *userUsecase) Register(ctx context.Context, fullName, username, email, c
 	email = strings.ToLower(strings.TrimSpace(email))
 	username = strings.ToLower(strings.TrimSpace(username))
 	contact = strings.TrimSpace(contact)
+
+	// Validate MX records for email domain
+	emailParts := strings.Split(email, "@")
+	if len(emailParts) != 2 {
+		return map[string]interface{}{"code": "invalid_email_format", "message": "Invalid email address format."}, nil
+	}
+	emailDomain := emailParts[1]
+	// Bypass MX lookup for common local testing/mock domains
+	if emailDomain != "localhost" && !strings.HasSuffix(emailDomain, ".local") && emailDomain != "example.com" {
+		mxRecords, err := net.LookupMX(emailDomain)
+		if err != nil || len(mxRecords) == 0 {
+			return map[string]interface{}{
+				"code":    "invalid_email_domain",
+				"message": "The email domain does not exist or cannot receive mail. Please use a valid email address.",
+			}, nil
+		}
+	}
 
 	// Check if email taken
 	existingUser, err := u.repo.GetUserByEmail(ctx, email)
