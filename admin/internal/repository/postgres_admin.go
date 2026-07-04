@@ -35,7 +35,9 @@ func (r *postgresAdminRepository) RefreshDashboardStats(ctx context.Context) (*d
 	var studentCount int64
 	var teacherCount int64
 	var activeBatches int64
-	r.db.WithContext(ctx).Model(&domain.Student{}).Count(&studentCount)
+	r.db.WithContext(ctx).Model(&domain.Student{}).Where(
+		"id IN (SELECT student_id FROM enrollments)",
+	).Count(&studentCount)
 	r.db.WithContext(ctx).Model(&domain.Teacher{}).Count(&teacherCount)
 	r.db.WithContext(ctx).Model(&domain.Course{}).Where("course_status <> ?", "completed").Count(&activeBatches)
 
@@ -178,6 +180,10 @@ func (r *postgresAdminRepository) ListStudents(ctx context.Context, query, categ
 			Joins("JOIN courses ON courses.id = enrollments.course_id").
 			Where("LOWER(courses.category) = ?", strings.ToLower(category)).
 			Distinct()
+	} else {
+		dbQuery = dbQuery.Where(
+			"students.id IN (SELECT student_id FROM enrollments)",
+		)
 	}
 	
 	if query != "" {
