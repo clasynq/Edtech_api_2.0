@@ -605,7 +605,7 @@ func (u *adminUsecase) GetSalesAnalysis(ctx context.Context, monthStr, category 
 		}
 
 		coursesTotalEnrollments += monthlyCourseSales
-		coursesRevenue += float64(monthlyCourseSales) * c.Price
+		coursesRevenue += c.Revenue
 
 		coursesData[i] = map[string]interface{}{
 			"id":                      c.ID,
@@ -646,7 +646,7 @@ func (u *adminUsecase) GetSalesAnalysis(ctx context.Context, monthStr, category 
 		}
 
 		notesTotalSales += monthlyNoteSales
-		notesRevenue += float64(monthlyNoteSales) * n.Price
+		notesRevenue += n.Revenue
 
 		notesData[i] = map[string]interface{}{
 			"id":                 n.ID,
@@ -686,7 +686,7 @@ func (u *adminUsecase) GetSalesAnalysis(ctx context.Context, monthStr, category 
 		}
 
 		tsTotalSales += monthlyTsSales
-		tsRevenue += float64(monthlyTsSales) * ts.Price
+		tsRevenue += ts.Revenue
 
 		tsData[i] = map[string]interface{}{
 			"id":                 ts.ID,

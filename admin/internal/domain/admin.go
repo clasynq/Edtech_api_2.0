@@ -231,13 +231,13 @@ func (UserNotification) TableName() string {
 	return "user_notifications"
 }
 
-// Structs for Sales Analysis Report
 type CourseSales struct {
 	ID         int64
 	CourseName string
 	BatchID    string
 	Price      float64
 	SalesCount int64
+	Revenue    float64
 }
 
 type NoteSales struct {
@@ -245,6 +245,7 @@ type NoteSales struct {
 	Title      string
 	Price      float64
 	SalesCount int64
+	Revenue    float64
 }
 
 type TestSeriesSales struct {
@@ -252,6 +253,7 @@ type TestSeriesSales struct {
 	Title      string
 	Price      float64
 	SalesCount int64
+	Revenue    float64
 }
 
 type AdminRepository interface {

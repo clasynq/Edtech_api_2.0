@@ -222,7 +222,14 @@ func (r *postgresAdminRepository) GetStudentEnrollmentInfo(ctx context.Context, 
 func (r *postgresAdminRepository) GetCoursesSales(ctx context.Context, category string, start, end time.Time) ([]domain.CourseSales, error) {
 	var list []domain.CourseSales
 	query := r.db.WithContext(ctx).Table("courses").
-		Select("courses.id, courses.course_name, courses.batch_id, courses.final_price as price, COUNT(enrollments.id) as sales_count").
+		Select(`
+			courses.id, 
+			courses.course_name, 
+			courses.batch_id, 
+			courses.final_price as price, 
+			COUNT(enrollments.id) as sales_count,
+			COALESCE((SELECT SUM(amount) FROM payment_orders WHERE payment_orders.course_id = courses.id AND payment_orders.status = 'completed' AND payment_orders.order_type = 'course' AND payment_orders.created_at BETWEEN ? AND ?), 0) as revenue
+		`, start, end).
 		Joins("LEFT JOIN enrollments ON enrollments.course_id = courses.id AND enrollments.created_at BETWEEN ? AND ?", start, end).
 		Group("courses.id, courses.course_name, courses.batch_id, courses.final_price").
 		Order("courses.course_name")
@@ -238,7 +245,13 @@ func (r *postgresAdminRepository) GetCoursesSales(ctx context.Context, category 
 func (r *postgresAdminRepository) GetNotesSales(ctx context.Context, category string, start, end time.Time) ([]domain.NoteSales, error) {
 	var list []domain.NoteSales
 	query := r.db.WithContext(ctx).Table("notes").
-		Select("notes.id, notes.title, notes.price, COUNT(note_accesses.id) as sales_count").
+		Select(`
+			notes.id, 
+			notes.title, 
+			notes.price, 
+			COUNT(note_accesses.id) as sales_count,
+			COALESCE((SELECT SUM(amount) FROM payment_orders WHERE payment_orders.note_id = notes.id AND payment_orders.status = 'completed' AND payment_orders.order_type = 'note' AND payment_orders.created_at BETWEEN ? AND ?), 0) as revenue
+		`, start, end).
 		Joins("LEFT JOIN note_accesses ON note_accesses.note_id = notes.id AND note_accesses.created_at BETWEEN ? AND ?", start, end).
 		Where("notes.note_type = ? AND notes.is_free = ?", "public", false).
 		Group("notes.id, notes.title, notes.price").
@@ -255,7 +268,13 @@ func (r *postgresAdminRepository) GetNotesSales(ctx context.Context, category st
 func (r *postgresAdminRepository) GetTestSeriesSales(ctx context.Context, category string, start, end time.Time) ([]domain.TestSeriesSales, error) {
 	var list []domain.TestSeriesSales
 	query := r.db.WithContext(ctx).Table("test_series").
-		Select("test_series.id, test_series.title, test_series.price, COUNT(test_series_accesses.id) as sales_count").
+		Select(`
+			test_series.id, 
+			test_series.title, 
+			test_series.price, 
+			COUNT(test_series_accesses.id) as sales_count,
+			COALESCE((SELECT SUM(amount) FROM payment_orders WHERE payment_orders.test_series_id = test_series.id AND payment_orders.status = 'completed' AND payment_orders.order_type = 'test_series' AND payment_orders.created_at BETWEEN ? AND ?), 0) as revenue
+		`, start, end).
 		Joins("LEFT JOIN test_series_accesses ON test_series_accesses.test_series_id = test_series.id AND test_series_accesses.created_at BETWEEN ? AND ?", start, end).
 		Where("test_series.is_free = ? AND test_series.course_id IS NULL", false).
 		Group("test_series.id, test_series.title, test_series.price").
