@@ -235,15 +235,15 @@ func (r *postgresEnrollmentRepository) UpdatePaymentOrder(ctx context.Context, o
 	return r.db.WithContext(ctx).Save(order).Error
 }
 
-func (r *postgresEnrollmentRepository) HasUserCompletedOrderForReferrer(ctx context.Context, buyerID, referrerID int64) (bool, error) {
+func (r *postgresEnrollmentRepository) CountUserCompletedOrdersForReferrer(ctx context.Context, buyerID, referrerID int64) (int64, error) {
 	var count int64
 	err := r.db.WithContext(ctx).Model(&domain.PaymentOrder{}).
 		Where("user_id = ? AND referrer_id = ? AND status = 'completed'", buyerID, referrerID).
 		Count(&count).Error
 	if err != nil {
-		return false, err
+		return 0, err
 	}
-	return count > 0, nil
+	return count, nil
 }
 
 func (r *postgresEnrollmentRepository) GetReferralTransactionByID(ctx context.Context, id int64) (*domain.ReferralTransaction, error) {

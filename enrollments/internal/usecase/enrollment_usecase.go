@@ -89,13 +89,13 @@ func (u *enrollmentUsecase) ValidateReferral(ctx context.Context, buyerID int64,
 		}
 	}
 
-	// 4. Anti-fraud: Cannot use the same referral code more than once
-	usedBefore, err := u.repo.HasUserCompletedOrderForReferrer(ctx, buyerID, referrer.ID)
+	// 4. Anti-fraud: Cannot use the same referral code more than 5 times
+	buyerUsageCount, err := u.repo.CountUserCompletedOrdersForReferrer(ctx, buyerID, referrer.ID)
 	if err != nil {
 		return nil, err
 	}
-	if usedBefore {
-		return map[string]interface{}{"valid": false, "message": "You have already used a referral code from this referrer"}, nil
+	if buyerUsageCount >= 5 {
+		return map[string]interface{}{"valid": false, "message": "You have already reached the limit (5) of using referral codes from this referrer"}, nil
 	}
 
 	// 5. Anti-fraud: Referral code cap (10 successful referrals)

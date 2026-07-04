@@ -262,7 +262,7 @@ type EnrollmentRepository interface {
 	GetPaymentOrderByPaymentID(ctx context.Context, paymentID string) (*PaymentOrder, error)
 	CreatePaymentOrder(ctx context.Context, order *PaymentOrder) error
 	UpdatePaymentOrder(ctx context.Context, order *PaymentOrder) error
-	HasUserCompletedOrderForReferrer(ctx context.Context, buyerID, referrerID int64) (bool, error)
+	CountUserCompletedOrdersForReferrer(ctx context.Context, buyerID, referrerID int64) (int64, error)
 
 	GetReferralTransactionByID(ctx context.Context, id int64) (*ReferralTransaction, error)
 	GetReferralTransactionByOrderID(ctx context.Context, orderID int64) (*ReferralTransaction, error)
