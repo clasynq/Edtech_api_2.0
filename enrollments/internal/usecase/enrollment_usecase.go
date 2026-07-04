@@ -131,6 +131,7 @@ func (u *enrollmentUsecase) ValidateReferral(ctx context.Context, buyerID int64,
 		"finalPrice":     finalPrice,
 		"message":        "Referral code is valid",
 		"referrerId":     referrer.ID,
+		"referrerName":   referrer.Username,
 	}, nil
 }
 
