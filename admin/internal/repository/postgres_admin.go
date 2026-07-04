@@ -167,7 +167,34 @@ func (r *postgresAdminRepository) UpdateTeacher(ctx context.Context, teacher *do
 }
 
 func (r *postgresAdminRepository) DeleteTeacher(ctx context.Context, id int64) error {
-	return r.db.WithContext(ctx).Delete(&domain.Teacher{}, id).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// 1. Set courses.teacher_id = NULL
+		if err := tx.Exec("UPDATE courses SET teacher_id = NULL WHERE teacher_id = ?", id).Error; err != nil {
+			return err
+		}
+
+		// 2. Delete from courses_teachers join table
+		if err := tx.Exec("DELETE FROM courses_teachers WHERE teacher_id = ?", id).Error; err != nil {
+			return err
+		}
+
+		// 3. Delete from class_schedules
+		if err := tx.Exec("DELETE FROM class_schedules WHERE teacher_id = ?", id).Error; err != nil {
+			return err
+		}
+
+		// 4. Delete from teacher_activities
+		if err := tx.Exec("DELETE FROM teacher_activities WHERE teacher_id = ?", id).Error; err != nil {
+			return err
+		}
+
+		// 5. Delete the teacher record
+		if err := tx.Delete(&domain.Teacher{}, id).Error; err != nil {
+			return err
+		}
+
+		return nil
+	})
 }
 
 func (r *postgresAdminRepository) ListStudents(ctx context.Context, query, category string) ([]domain.Student, error) {
