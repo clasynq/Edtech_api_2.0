@@ -276,7 +276,7 @@ type AdminRepository interface {
 	
 	// Students
 	ListStudents(ctx context.Context, query, category string) ([]Student, error)
-	GetStudentEnrollmentInfo(ctx context.Context, studentIDs []int64) (map[int64][]string, map[int64][]string, error)
+	GetStudentEnrollmentInfo(ctx context.Context, studentIDs []int64) (map[int64][]string, map[int64][]string, map[int64][]string, map[int64][]string, error)
 
 	// Sales Analysis Queries
 	GetCoursesSales(ctx context.Context, category string, start, end time.Time) ([]CourseSales, error)

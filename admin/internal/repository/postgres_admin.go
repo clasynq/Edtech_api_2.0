@@ -197,32 +197,84 @@ func (r *postgresAdminRepository) ListStudents(ctx context.Context, query, categ
 	return students, err
 }
 
-func (r *postgresAdminRepository) GetStudentEnrollmentInfo(ctx context.Context, studentIDs []int64) (map[int64][]string, map[int64][]string, error) {
+func (r *postgresAdminRepository) GetStudentEnrollmentInfo(ctx context.Context, studentIDs []int64) (map[int64][]string, map[int64][]string, map[int64][]string, map[int64][]string, error) {
 	if len(studentIDs) == 0 {
-		return make(map[int64][]string), make(map[int64][]string), nil
+		return make(map[int64][]string), make(map[int64][]string), make(map[int64][]string), make(map[int64][]string), nil
 	}
 	var results []struct {
-		StudentID  int64  `gorm:"column:student_id"`
-		CourseName string `gorm:"column:course_name"`
-		BatchID    string `gorm:"column:batch_id"`
+		StudentID   int64  `gorm:"column:student_id"`
+		CourseID    int64  `gorm:"column:course_id"`
+		CourseName  string `gorm:"column:course_name"`
+		BatchID     string `gorm:"column:batch_id"`
+		TeacherName string `gorm:"column:teacher_name"`
 	}
 
 	err := r.db.WithContext(ctx).Table("enrollments").
-		Select("enrollments.student_id, courses.course_name, courses.batch_id").
+		Select("enrollments.student_id, enrollments.course_id, courses.course_name, courses.batch_id, teachers.name as teacher_name").
 		Joins("JOIN courses ON courses.id = enrollments.course_id").
+		Joins("LEFT JOIN teachers ON teachers.id = courses.teacher_id").
 		Where("enrollments.student_id IN ?", studentIDs).
 		Scan(&results).Error
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, nil, err
+	}
+
+	var courseIDs []int64
+	courseIDMap := make(map[int64]bool)
+	for _, res := range results {
+		if !courseIDMap[res.CourseID] {
+			courseIDMap[res.CourseID] = true
+			courseIDs = append(courseIDs, res.CourseID)
+		}
+	}
+
+	var subjectsResults []struct {
+		CourseID    int64  `gorm:"column:course_id"`
+		SubjectName string `gorm:"column:subject_name"`
+	}
+
+	if len(courseIDs) > 0 {
+		err = r.db.WithContext(ctx).Table("courses_subjects").
+			Select("courses_subjects.course_id, subjects.subject_name").
+			Joins("JOIN subjects ON subjects.id = courses_subjects.subject_id").
+			Where("courses_subjects.course_id IN ?", courseIDs).
+			Scan(&subjectsResults).Error
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
+	}
+
+	courseSubjects := make(map[int64][]string)
+	for _, sub := range subjectsResults {
+		courseSubjects[sub.CourseID] = append(courseSubjects[sub.CourseID], sub.SubjectName)
+	}
+
+	appendUnique := func(slice []string, val string) []string {
+		for _, s := range slice {
+			if s == val {
+				return slice
+			}
+		}
+		return append(slice, val)
 	}
 
 	coursesMap := make(map[int64][]string)
 	batchesMap := make(map[int64][]string)
+	subjectsMap := make(map[int64][]string)
+	teachersMap := make(map[int64][]string)
+
 	for _, res := range results {
-		coursesMap[res.StudentID] = append(coursesMap[res.StudentID], res.CourseName)
-		batchesMap[res.StudentID] = append(batchesMap[res.StudentID], res.BatchID)
+		coursesMap[res.StudentID] = appendUnique(coursesMap[res.StudentID], res.CourseName)
+		batchesMap[res.StudentID] = appendUnique(batchesMap[res.StudentID], res.BatchID)
+		if res.TeacherName != "" {
+			teachersMap[res.StudentID] = appendUnique(teachersMap[res.StudentID], res.TeacherName)
+		}
+		for _, subName := range courseSubjects[res.CourseID] {
+			subjectsMap[res.StudentID] = appendUnique(subjectsMap[res.StudentID], subName)
+		}
 	}
-	return coursesMap, batchesMap, nil
+
+	return coursesMap, batchesMap, subjectsMap, teachersMap, nil
 }
 
 func (r *postgresAdminRepository) GetCoursesSales(ctx context.Context, category string, start, end time.Time) ([]domain.CourseSales, error) {

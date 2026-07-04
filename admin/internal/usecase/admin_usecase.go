@@ -482,12 +482,14 @@ func (u *adminUsecase) ListStudents(ctx context.Context, query, category string)
 		studentIDs[i] = s.ID
 	}
 
-	// Fetch courses & batches info in a single batch query
-	coursesMap, batchesMap, err := u.repo.GetStudentEnrollmentInfo(ctx, studentIDs)
+	// Fetch courses, batches, subjects, & teachers info in a single batch query
+	coursesMap, batchesMap, subjectsMap, teachersMap, err := u.repo.GetStudentEnrollmentInfo(ctx, studentIDs)
 	if err != nil {
 		// Log/fail-safe
 		coursesMap = make(map[int64][]string)
 		batchesMap = make(map[int64][]string)
+		subjectsMap = make(map[int64][]string)
+		teachersMap = make(map[int64][]string)
 	}
 
 	res := make([]map[string]interface{}, len(list))
@@ -499,6 +501,14 @@ func (u *adminUsecase) ListStudents(ctx context.Context, query, category string)
 		batches := batchesMap[s.ID]
 		if batches == nil {
 			batches = []string{}
+		}
+		subjects := subjectsMap[s.ID]
+		if subjects == nil {
+			subjects = []string{}
+		}
+		teachers := teachersMap[s.ID]
+		if teachers == nil {
+			teachers = []string{}
 		}
 
 		res[i] = map[string]interface{}{
@@ -513,6 +523,8 @@ func (u *adminUsecase) ListStudents(ctx context.Context, query, category string)
 			"createdAt":        s.CreatedAt.Format(time.RFC3339),
 			"purchasedCourses": courses,
 			"purchasedBatches": batches,
+			"subjects":         subjects,
+			"teachers":         teachers,
 		}
 	}
 	return res, nil
