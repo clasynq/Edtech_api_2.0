@@ -193,7 +193,7 @@ func (r *postgresAdminRepository) ListStudents(ctx context.Context, query, categ
 			Where("LOWER(users.full_name) LIKE ? OR LOWER(users.contact_number) LIKE ? OR LOWER(users.email) LIKE ?", q, q, q)
 	}
 	
-	err := dbQuery.Find(&students).Error
+	err := dbQuery.Order("(SELECT MAX(created_at) FROM enrollments WHERE enrollments.student_id = students.id) DESC").Find(&students).Error
 	return students, err
 }
 
