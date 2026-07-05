@@ -65,6 +65,12 @@ func (r *postgresNoteRepository) GetNotes(ctx context.Context, filters map[strin
 		}
 	}
 
+	if teacherIDStr, ok := filters["teacherId"]; ok && teacherIDStr != "" {
+		if teacherID, err := strconv.ParseInt(teacherIDStr, 10, 64); err == nil {
+			query = query.Where("courses.teacher_id = ? OR courses.id IN (SELECT course_id FROM courses_teachers WHERE teacher_id = ?)", teacherID, teacherID)
+		}
+	}
+
 	if search, ok := filters["search"]; ok && search != "" {
 		searchParam := "%" + strings.ToLower(search) + "%"
 		query = query.Where("LOWER(notes.title) LIKE ? OR LOWER(notes.description) LIKE ?", searchParam, searchParam)
