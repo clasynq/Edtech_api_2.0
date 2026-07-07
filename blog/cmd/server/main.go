@@ -18,14 +18,17 @@ import (
 	"gorm.io/gorm/logger"
 )
 
+// main is the server entrypoint for the Blog microservice.
+// It initializes DB connections, config, dependency injection layers,
+// serves static uploaded files, and binds the router to port 8086.
 func main() {
-	// 1. Load config
+	// 1. Load configuration from environment or .env variables.
 	cfg := config.LoadConfig()
 	if cfg.Port == "" {
 		cfg.Port = "8086" // Default port for the blog service
 	}
 
-	// 2. Connect to Postgres
+	// 2. Connect to primary PostgreSQL instance.
 	log.Printf("Connecting to Postgres at: %s", cfg.DatabaseURL)
 	dbLogger := logger.New(
 		log.New(os.Stdout, "\r\n", log.LstdFlags),
@@ -39,12 +42,11 @@ func main() {
 	db, err := gorm.Open(postgres.Open(cfg.DatabaseURL), &gorm.Config{
 		Logger: dbLogger,
 	})
-
 	if err != nil {
 		log.Fatalf("failed to connect to database: %v", err)
 	}
 
-	// 3. Connect to Redis (optional/fail-safe open)
+	// 3. Connect to Redis (optional/fail-safe open).
 	var rdb *redis.Client
 	if cfg.RedisURL != "" {
 		opt, err := redis.ParseURL(cfg.RedisURL)
@@ -56,17 +58,17 @@ func main() {
 		}
 	}
 
-	// 4. Initialize layers
+	// 4. Initialize Clean Architecture dependency injection layers.
 	repo := repository.NewPostgresBlogRepository(db)
 	uc := usecase.NewBlogUsecase(repo, rdb)
 	handler := delivery.NewHttpHandler(uc, cfg.MediaRoot, cfg.BaseURL)
 	authMiddleware := delivery.AuthMiddleware(cfg.SecretKey, rdb)
 	optionalAuthMiddleware := delivery.OptionalAuthMiddleware(cfg.SecretKey)
 
-	// 5. Initialize router & routes
+	// 5. Initialize the Gin HTTP router
 	r := gin.Default()
 
-	// Serve uploaded media statically for development/testing
+	// Serve uploaded media statically for local development / testing media files.
 	r.Static("/media", cfg.MediaRoot)
 	log.Printf("Serving static files from directory %s on /media route", cfg.MediaRoot)
 
@@ -82,3 +84,4 @@ func main() {
 		log.Fatalf("failed to start server: %v", err)
 	}
 }
+

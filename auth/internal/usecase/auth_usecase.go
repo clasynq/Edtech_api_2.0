@@ -16,12 +16,15 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// userUsecase implements the domain.UserUsecase interface, encapsulating core business rules
+// for signups, multi-role logins, 2FA, OTP limits, profile management, and social follower linkages.
 type userUsecase struct {
-	repo   domain.UserRepository
-	rdb    *redis.Client
-	cfg    *config.Config
+	repo domain.UserRepository
+	rdb  *redis.Client
+	cfg  *config.Config
 }
 
+// NewUserUsecase returns a new instance of domain.UserUsecase with dependency references.
 func NewUserUsecase(repo domain.UserRepository, rdb *redis.Client, cfg *config.Config) domain.UserUsecase {
 	return &userUsecase{
 		repo: repo,
@@ -30,7 +33,7 @@ func NewUserUsecase(repo domain.UserRepository, rdb *redis.Client, cfg *config.C
 	}
 }
 
-// Generate cryptographically secure numeric code
+// generateNumericCode creates a cryptographically secure random string of numbers with the given length.
 func generateNumericCode(length int) string {
 	const digits = "0123456789"
 	result := make([]byte, length)
@@ -41,7 +44,7 @@ func generateNumericCode(length int) string {
 	return string(result)
 }
 
-// Generate cryptographically secure random salt
+// generateSalt creates a cryptographically secure random alphanumeric string of the given length.
 func generateSalt(length int) string {
 	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	result := make([]byte, length)
@@ -52,18 +55,21 @@ func generateSalt(length int) string {
 	return string(result)
 }
 
+// Register registers a new student by validating domain details, hashing passwords, generating OTP verification,
+// and staging the record in the pending_registrations table.
 func (u *userUsecase) Register(ctx context.Context, fullName, username, email, contact, password, remoteIP string) (map[string]interface{}, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	username = strings.ToLower(strings.TrimSpace(username))
 	contact = strings.TrimSpace(contact)
 
-	// Validate MX records for email domain
+	// 1. Validate MX records for email domain to check deliverability.
 	emailParts := strings.Split(email, "@")
 	if len(emailParts) != 2 {
 		return map[string]interface{}{"code": "invalid_email_format", "message": "Invalid email address format."}, nil
 	}
 	emailDomain := emailParts[1]
-	// Bypass MX lookup for common local testing/mock domains
+	
+	// Bypass MX lookup for common local testing/mock domains to avoid local development timeouts.
 	if emailDomain != "localhost" && !strings.HasSuffix(emailDomain, ".local") && emailDomain != "example.com" {
 		mxRecords, err := net.LookupMX(emailDomain)
 		if err != nil || len(mxRecords) == 0 {
@@ -74,7 +80,7 @@ func (u *userUsecase) Register(ctx context.Context, fullName, username, email, c
 		}
 	}
 
-	// Check if email taken
+	// 2. Check if email is already registered in the primary users table.
 	existingUser, err := u.repo.GetUserByEmail(ctx, email)
 	if err != nil {
 		return nil, err
@@ -83,7 +89,7 @@ func (u *userUsecase) Register(ctx context.Context, fullName, username, email, c
 		return map[string]interface{}{"code": "email_taken", "message": "Email is already in use."}, nil
 	}
 
-	// Check if username taken
+	// 3. Check if username is already registered.
 	existingUsername, err := u.repo.GetUserByUsername(ctx, username)
 	if err != nil {
 		return nil, err
@@ -92,7 +98,7 @@ func (u *userUsecase) Register(ctx context.Context, fullName, username, email, c
 		return map[string]interface{}{"code": "username_taken", "message": "Username is already taken."}, nil
 	}
 
-	// Check if contact number taken
+	// 4. Check if contact number is already registered.
 	existingContact, err := u.repo.GetUserByContact(ctx, contact)
 	if err != nil {
 		return nil, err
@@ -101,11 +107,11 @@ func (u *userUsecase) Register(ctx context.Context, fullName, username, email, c
 		return map[string]interface{}{"code": "contact_number_taken", "message": "Contact number is already in use."}, nil
 	}
 
-	// Pre-hash password with Django PBKDF2
+	// 5. Hash password with Django-compatible PBKDF2 digest.
 	salt := generateSalt(12)
 	passwordHash := utils.EncodeDjangoPassword(password, salt, 390000)
 
-	// Generate OTP
+	// 6. Generate 6-digit verification OTP and save its hash.
 	rawCode := generateNumericCode(6)
 	codeSalt := generateSalt(12)
 	codeHash := utils.EncodeDjangoPassword(rawCode, codeSalt, 390000)
@@ -126,12 +132,12 @@ func (u *userUsecase) Register(ctx context.Context, fullName, username, email, c
 		LastSentAt:    time.Now(),
 	}
 
-	// Save to DB
+	// 7. Persist staged record in pending_registrations table.
 	if err := u.repo.SavePendingRegistration(ctx, pending); err != nil {
 		return nil, err
 	}
 
-	// Send Email
+	// 8. Deliver OTP email.
 	err = utils.SendOTPEmail(
 		email,
 		rawCode,
@@ -145,7 +151,7 @@ func (u *userUsecase) Register(ctx context.Context, fullName, username, email, c
 		ttlSeconds,
 	)
 	if err != nil {
-		// Log error but do not fail completely (as Django fails silently/returns email send failed error)
+		// Log error but do not fail completely (to match Django silent behavior / fallback messages)
 		return map[string]interface{}{"code": "email_send_failed", "message": "We could not send the verification email. Please try again in a moment."}, nil
 	}
 
@@ -156,9 +162,12 @@ func (u *userUsecase) Register(ctx context.Context, fullName, username, email, c
 	}, nil
 }
 
+// VerifyOTP validates the 6-digit registration code. On success, it creates a live User,
+// instantiates a Student profile, deletes the pending record, and issues JWT tokens.
 func (u *userUsecase) VerifyOTP(ctx context.Context, email, code string) (map[string]interface{}, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 
+	// Fetch pending registration.
 	pending, err := u.repo.GetPendingRegistration(ctx, email)
 	if err != nil {
 		return nil, err
@@ -167,16 +176,19 @@ func (u *userUsecase) VerifyOTP(ctx context.Context, email, code string) (map[st
 		return map[string]interface{}{"code": "otp_no_pending_registration", "message": "No pending registration found for this email."}, nil
 	}
 
+	// Verify expiration window.
 	if pending.CodeExpiresAt.Before(time.Now()) {
 		_ = u.repo.DeletePendingRegistration(ctx, email)
 		return map[string]interface{}{"code": "otp_expired", "message": "Verification code has expired. Please request a new one."}, nil
 	}
 
+	// Limit incorrect verification attempts to prevent brute-forcing.
 	maxAttempts := 3
 	if pending.Attempts >= maxAttempts {
 		return map[string]interface{}{"code": "otp_too_many_attempts", "message": "Too many incorrect attempts. Please request a new code."}, nil
 	}
 
+	// Verify code against saved hash.
 	ok, err := utils.VerifyDjangoPassword(code, pending.CodeHash)
 	if err != nil || !ok {
 		pending.Attempts++
@@ -192,7 +204,7 @@ func (u *userUsecase) VerifyOTP(ctx context.Context, email, code string) (map[st
 		}, nil
 	}
 
-	// Promoted to Student
+	// Code matched! Create permanent User and Student profiles atomically in a transaction.
 	user, err := u.repo.CreateUserFromPending(ctx, pending)
 	if err != nil {
 		if strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "users_email_key") {
@@ -202,7 +214,7 @@ func (u *userUsecase) VerifyOTP(ctx context.Context, email, code string) (map[st
 		return nil, err
 	}
 
-	// Issue simple_jwt tokens
+	// Issue JWT token pairs (access and refresh token).
 	tokens, err := utils.GenerateTokenPair(
 		ctx, u.rdb, "student", user.ID, "student", "", u.cfg.SecretKey, 18000, 31536000, // Access 300 mins (18000s), Refresh 365 days
 	)
@@ -222,6 +234,7 @@ func (u *userUsecase) VerifyOTP(ctx context.Context, email, code string) (map[st
 	}, nil
 }
 
+// ResendOTP triggers a new 6-digit OTP code if the 60-second cooldown window has elapsed.
 func (u *userUsecase) ResendOTP(ctx context.Context, email string) (map[string]interface{}, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 
@@ -233,7 +246,7 @@ func (u *userUsecase) ResendOTP(ctx context.Context, email string) (map[string]i
 		return map[string]interface{}{"code": "otp_no_pending_registration", "message": "No pending registration found for this email."}, nil
 	}
 
-	// Check Cooldown (60 seconds)
+	// Check Cooldown safety (60 seconds) to prevent spamming.
 	cooldownSec := 60
 	elapsed := time.Since(pending.LastSentAt).Seconds()
 	remaining := cooldownSec - int(elapsed)
@@ -245,12 +258,13 @@ func (u *userUsecase) ResendOTP(ctx context.Context, email string) (map[string]i
 		}, nil
 	}
 
+	// Maximum resends permitted per registration.
 	maxResends := 5
 	if pending.ResendCount >= maxResends {
 		return map[string]interface{}{"code": "otp_resend_limit", "message": "Resend limit reached. Restart registration."}, nil
 	}
 
-	// Update OTP
+	// Regenerate code, update expiration and save.
 	rawCode := generateNumericCode(6)
 	codeSalt := generateSalt(12)
 	pending.CodeHash = utils.EncodeDjangoPassword(rawCode, codeSalt, 390000)
@@ -264,7 +278,7 @@ func (u *userUsecase) ResendOTP(ctx context.Context, email string) (map[string]i
 		return nil, err
 	}
 
-	// Send email
+	// Deliver new code email.
 	err = utils.SendOTPEmail(
 		email,
 		rawCode,
@@ -287,6 +301,9 @@ func (u *userUsecase) ResendOTP(ctx context.Context, email string) (map[string]i
 	}, nil
 }
 
+// Login verifies login credentials for Students, Admins, or Teachers.
+// For Students: issues JWT token pair directly on success.
+// For Workers (Admin/Teacher): triggers 2FA verification flow and mails a 2FA login code.
 func (u *userUsecase) Login(ctx context.Context, emailOrUsername, password, remoteIP, role string) (map[string]interface{}, error) {
 	emailOrUsername = strings.TrimSpace(emailOrUsername)
 	role = strings.ToLower(strings.TrimSpace(role))
@@ -328,8 +345,9 @@ func (u *userUsecase) Login(ctx context.Context, emailOrUsername, password, remo
 		}
 	}
 
+	// 2. Try resolving as Admin or Teacher (requires 2FA mail verification)
 	if strings.Contains(emailOrUsername, "@") {
-		// Admin
+		// Admin Login check
 		if checkAdmin {
 			adminUser, err := u.repo.GetAdminByEmail(ctx, emailOrUsername)
 			if err == nil && adminUser != nil {
@@ -341,6 +359,7 @@ func (u *userUsecase) Login(ctx context.Context, emailOrUsername, password, remo
 						_ = u.rdb.Set(ctx, otpKey, otpCode, 5*time.Minute).Err()
 					}
 
+					// Mail 2FA code
 					err = utils.SendOTPEmail(
 						adminUser.Email,
 						otpCode,
@@ -366,7 +385,7 @@ func (u *userUsecase) Login(ctx context.Context, emailOrUsername, password, remo
 			}
 		}
 
-		// Teacher
+		// Teacher Login check
 		if checkTeacher {
 			teacherUser, err := u.repo.GetTeacherByEmail(ctx, emailOrUsername)
 			if err == nil && teacherUser != nil {
@@ -378,6 +397,7 @@ func (u *userUsecase) Login(ctx context.Context, emailOrUsername, password, remo
 						_ = u.rdb.Set(ctx, otpKey, otpCode, 5*time.Minute).Err()
 					}
 
+					// Mail 2FA code
 					err = utils.SendOTPEmail(
 						teacherUser.Email,
 						otpCode,
@@ -407,6 +427,7 @@ func (u *userUsecase) Login(ctx context.Context, emailOrUsername, password, remo
 	return nil, errors.New("Authentication failed. Invalid email or password.")
 }
 
+// VerifyLogin2FA verifies the 2FA code from Redis and compiles JWT tokens for Admin/Teacher roles.
 func (u *userUsecase) VerifyLogin2FA(ctx context.Context, email, code, role string) (map[string]interface{}, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	otpKey := fmt.Sprintf("login_otp:%s", email)
@@ -424,10 +445,10 @@ func (u *userUsecase) VerifyLogin2FA(ctx context.Context, email, code, role stri
 		return nil, errors.New("invalid verification code.")
 	}
 
-	// Code matched! Delete OTP
+	// Code matched! Delete the temporary OTP code from Redis.
 	u.rdb.Del(ctx, otpKey)
 
-	// Generate token pair and profile based on role
+	// Generate token pair and profile based on role.
 	if role == "admin" {
 		adminUser, err := u.repo.GetAdminByEmail(ctx, email)
 		if err != nil || adminUser == nil {
@@ -483,10 +504,11 @@ func (u *userUsecase) VerifyLogin2FA(ctx context.Context, email, code, role stri
 	return nil, errors.New("invalid role")
 }
 
+// ForgotPassword initiates password resets by verifying account presence, issuing a 5-minute OTP and mailing it.
 func (u *userUsecase) ForgotPassword(ctx context.Context, email string) (map[string]interface{}, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 
-	// Verify user exists (either student or worker)
+	// Verify user exists (either student, admin, or teacher)
 	userExists := false
 	var name string
 
@@ -512,7 +534,7 @@ func (u *userUsecase) ForgotPassword(ctx context.Context, email string) (map[str
 		return map[string]interface{}{"code": "email_not_found", "message": "No account associated with this email address."}, nil
 	}
 
-	// Create Reset OTP
+	// Create Reset OTP.
 	rawCode := generateNumericCode(6)
 	codeSalt := generateSalt(12)
 	codeHash := utils.EncodeDjangoPassword(rawCode, codeSalt, 390000)
@@ -555,6 +577,7 @@ func (u *userUsecase) ForgotPassword(ctx context.Context, email string) (map[str
 	}, nil
 }
 
+// ResetPassword validates the reset code and updates the password hash for the respective user account entity.
 func (u *userUsecase) ResetPassword(ctx context.Context, email, code, newPassword string) (map[string]interface{}, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 
@@ -591,11 +614,11 @@ func (u *userUsecase) ResetPassword(ctx context.Context, email, code, newPasswor
 		}, nil
 	}
 
-	// Update Password
+	// Update Password Hash.
 	salt := generateSalt(12)
 	newPasswordHash := utils.EncodeDjangoPassword(newPassword, salt, 390000)
 
-	// Update password for whatever entity matches
+	// Check whichever role database entity exists and update its password.
 	student, err := u.repo.GetUserByEmail(ctx, email)
 	if err == nil && student != nil {
 		student.Password = newPasswordHash
@@ -619,6 +642,7 @@ func (u *userUsecase) ResetPassword(ctx context.Context, email, code, newPasswor
 	}, nil
 }
 
+// GetMe retrieves the authenticated user's profile and returns a serializable profile structure.
 func (u *userUsecase) GetMe(ctx context.Context, userID int64, role string) (map[string]interface{}, error) {
 	if role == "student" || role == "user" {
 		user, err := u.repo.GetUserByID(ctx, userID)
@@ -666,6 +690,7 @@ func (u *userUsecase) GetMe(ctx context.Context, userID int64, role string) (map
 	return nil, errors.New("Unknown user role.")
 }
 
+// UpdateMe modifies user profile settings and preferences.
 func (u *userUsecase) UpdateMe(ctx context.Context, userID int64, updates map[string]interface{}) (map[string]interface{}, error) {
 	user, err := u.repo.GetUserByID(ctx, userID)
 	if err != nil {
@@ -675,7 +700,7 @@ func (u *userUsecase) UpdateMe(ctx context.Context, userID int64, updates map[st
 		return nil, errors.New("User not found.")
 	}
 
-	// Update fields selectively
+	// Update fields selectively.
 	if val, ok := updates["fullName"].(string); ok {
 		user.FullName = val
 	}
@@ -725,6 +750,7 @@ func (u *userUsecase) UpdateMe(ctx context.Context, userID int64, updates map[st
 			if valStr == "" {
 				user.DateOfBirth = nil
 			} else {
+				// Parse date format (e.g. 1999-01-01T00:00:00Z -> 1999-01-02)
 				cleanDate := strings.Split(valStr, "T")[0]
 				t, err := time.Parse("2006-01-02", cleanDate)
 				if err == nil {
@@ -741,6 +767,7 @@ func (u *userUsecase) UpdateMe(ctx context.Context, userID int64, updates map[st
 	return u.compileStudentProfile(ctx, user)
 }
 
+// ChangePassword updates the logged-in user's password after verifying the old password.
 func (u *userUsecase) ChangePassword(ctx context.Context, userID int64, oldPassword, newPassword string) error {
 	user, err := u.repo.GetUserByID(ctx, userID)
 	if err != nil {
@@ -762,6 +789,7 @@ func (u *userUsecase) ChangePassword(ctx context.Context, userID int64, oldPassw
 	return u.repo.UpdateUser(ctx, user)
 }
 
+// SearchUsers performs a wild card search on users and returns serializable map profiles.
 func (u *userUsecase) SearchUsers(ctx context.Context, query string) ([]map[string]interface{}, error) {
 	users, err := u.repo.SearchUsers(ctx, query)
 	if err != nil {
@@ -783,6 +811,7 @@ func (u *userUsecase) SearchUsers(ctx context.Context, query string) ([]map[stri
 	return result, nil
 }
 
+// FollowUser establishes follow connections and creates notifications for the followed user.
 func (u *userUsecase) FollowUser(ctx context.Context, followerID, followedID int64) error {
 	if followerID == followedID {
 		return errors.New("You cannot follow yourself.")
@@ -798,15 +827,15 @@ func (u *userUsecase) FollowUser(ctx context.Context, followerID, followedID int
 		return err
 	}
 
-	// Trigger notifications
+	// Trigger follower alert notifications.
 	var followerName string
 	followerUser, errU := u.repo.GetUserByID(ctx, followerID)
 	if errU == nil && followerUser != nil {
 		followerName = followerUser.FullName
 	} else {
-		teacher, errT := u.repo.GetTeacherByID(ctx, followerID)
+		teacher, errT := u.repo.GetUserByID(ctx, followerID) // Retrieve details from teachers or admins if applicable
 		if errT == nil && teacher != nil {
-			followerName = teacher.Name
+			followerName = teacher.FullName
 		} else {
 			admin, errA := u.repo.GetAdminByID(ctx, followerID)
 			if errA == nil && admin != nil {
@@ -836,19 +865,23 @@ func (u *userUsecase) FollowUser(ctx context.Context, followerID, followedID int
 	return nil
 }
 
+// UnfollowUser dissolves a follow connection between users.
 func (u *userUsecase) UnfollowUser(ctx context.Context, followerID, followedID int64) error {
 	return u.repo.UnfollowUser(ctx, followerID, followedID)
 }
 
+// GetNotifications returns notifications for the user.
 func (u *userUsecase) GetNotifications(ctx context.Context, userID int64, role string) ([]domain.UserNotification, error) {
 	return u.repo.GetNotifications(ctx, userID, role)
 }
 
+// MarkNotificationsAsRead marks notifications as read.
 func (u *userUsecase) MarkNotificationsAsRead(ctx context.Context, userID int64, role string) error {
 	return u.repo.MarkNotificationsAsRead(ctx, userID, role)
 }
 
-// Compile complete StudentProfile serializable response
+// compileStudentProfile collects followers count, following count, referral count, and profile lists
+// to build the complete student profile JSON package.
 func (u *userUsecase) compileStudentProfile(ctx context.Context, user *domain.User) (map[string]interface{}, error) {
 	followers, _ := u.repo.GetFollowersList(ctx, user.ID)
 	following, _ := u.repo.GetFollowingList(ctx, user.ID)
@@ -932,6 +965,7 @@ func (u *userUsecase) compileStudentProfile(ctx context.Context, user *domain.Us
 	}, nil
 }
 
+// TokenRefresh verifies a refresh token and generates a new pair of access and refresh tokens.
 func (u *userUsecase) TokenRefresh(ctx context.Context, refreshToken string) (map[string]string, error) {
 	claims, err := utils.VerifyToken(refreshToken, u.cfg.SecretKey)
 	if err != nil {
@@ -942,7 +976,7 @@ func (u *userUsecase) TokenRefresh(ctx context.Context, refreshToken string) (ma
 		return nil, errors.New("Token is not a refresh token.")
 	}
 
-	// Issue new token pair using the old token's JTI to enforce session limit replacement
+	// Issue new token pair using the old token's JTI to enforce session limit replacement.
 	newTokens, err := utils.GenerateTokenPair(
 		ctx, u.rdb, claims.SubKind, claims.SubID, claims.Role, claims.ID, u.cfg.SecretKey, 18000, 31536000,
 	)
@@ -953,6 +987,7 @@ func (u *userUsecase) TokenRefresh(ctx context.Context, refreshToken string) (ma
 	return newTokens, nil
 }
 
+// ToggleFollowUser either follows or unfollows the target user depending on the existing relationship.
 func (u *userUsecase) ToggleFollowUser(ctx context.Context, followerID, followedID int64) error {
 	existing, err := u.repo.GetFollowRelationship(ctx, followerID, followedID)
 	if err != nil {
@@ -965,4 +1000,5 @@ func (u *userUsecase) ToggleFollowUser(ctx context.Context, followerID, followed
 
 	return u.FollowUser(ctx, followerID, followedID)
 }
+
 

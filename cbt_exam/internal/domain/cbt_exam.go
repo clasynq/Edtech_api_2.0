@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// User represents the users table reference
+// User represents the central users table reference.
 type User struct {
 	ID        int64     `gorm:"primaryKey;column:id"`
 	FullName  string    `gorm:"column:full_name"`
@@ -14,11 +14,12 @@ type User struct {
 	CreatedAt time.Time `gorm:"column:created_at"`
 }
 
+// TableName matches the User struct to the "users" table.
 func (User) TableName() string {
 	return "users"
 }
 
-// Student represents the students table reference
+// Student represents student profiles linked to User records.
 type Student struct {
 	ID        int64     `gorm:"primaryKey;column:id"`
 	UserID    int64     `gorm:"column:user_id"`
@@ -26,11 +27,12 @@ type Student struct {
 	CreatedAt time.Time `gorm:"column:created_at"`
 }
 
+// TableName matches the Student struct to the "students" table.
 func (Student) TableName() string {
 	return "students"
 }
 
-// Enrollment represents the enrollments table reference
+// Enrollment represents active course enrollment associations.
 type Enrollment struct {
 	ID        int64     `gorm:"primaryKey;column:id"`
 	StudentID int64     `gorm:"column:student_id"`
@@ -38,11 +40,12 @@ type Enrollment struct {
 	CreatedAt time.Time `gorm:"column:created_at"`
 }
 
+// TableName matches the Enrollment struct to the "enrollments" table.
 func (Enrollment) TableName() string {
 	return "enrollments"
 }
 
-// TestSeries represents the test_series table reference
+// TestSeries represents packages of related exam papers.
 type TestSeries struct {
 	ID          int64      `gorm:"primaryKey;column:id" json:"id"`
 	Title       string     `gorm:"column:title;type:varchar(255);not null" json:"title"`
@@ -60,11 +63,12 @@ type TestSeries struct {
 	Slug        string     `gorm:"column:slug;type:varchar(100);unique" json:"slug"`
 }
 
+// TableName matches the TestSeries struct to the "test_series" table.
 func (TestSeries) TableName() string {
 	return "test_series"
 }
 
-// Test represents the tests table reference
+// Test represents an individual assessment containing questions.
 type Test struct {
 	ID              int64     `gorm:"primaryKey;column:id" json:"id"`
 	Title           string    `gorm:"column:title;type:varchar(255);not null" json:"title"`
@@ -79,11 +83,12 @@ type Test struct {
 	Slug            string    `gorm:"column:slug;type:varchar(100);unique" json:"slug"`
 }
 
+// TableName matches the Test struct to the "tests" table.
 func (Test) TableName() string {
 	return "tests"
 }
 
-// QuestionOption represents the question_options table reference
+// QuestionOption represents a selectable answer choice linked to a specific Question.
 type QuestionOption struct {
 	ID             int64   `gorm:"primaryKey;column:id" json:"id"`
 	OptionText     *string `gorm:"column:option_text;type:text" json:"optionText"`
@@ -92,11 +97,12 @@ type QuestionOption struct {
 	QuestionID     int64   `gorm:"column:question_id;not null" json:"questionId"`
 }
 
+// TableName matches the QuestionOption struct to the "question_options" table.
 func (QuestionOption) TableName() string {
 	return "question_options"
 }
 
-// Question represents the questions table reference
+// Question represents a test question item, supporting MCQ, MSQ, and NAT types.
 type Question struct {
 	ID                  int64            `gorm:"primaryKey;column:id" json:"id"`
 	QuestionType        string           `gorm:"column:question_type;type:varchar(50);not null" json:"questionType"` // e.g. MCQ, MSQ, NAT
@@ -113,27 +119,29 @@ type Question struct {
 	Options             []QuestionOption `gorm:"foreignKey:QuestionID" json:"options,omitempty"`
 }
 
+// TableName matches the Question struct to the "questions" table.
 func (Question) TableName() string {
 	return "questions"
 }
 
-// StudentTestAttempt represents the student_test_attempts table
+// StudentTestAttempt logs details when a student is currently taking a test.
 type StudentTestAttempt struct {
-	ID           int64      `gorm:"primaryKey;column:id" json:"id"`
-	StartedAt    time.Time  `gorm:"column:started_at;type:timestamp with time zone" json:"startedAt"`
-	SubmittedAt  *time.Time `gorm:"column:submitted_at;type:timestamp with time zone" json:"submittedAt"`
-	Score        float64    `gorm:"column:score;type:numeric(6,2);not null" json:"score"`
-	Status       string     `gorm:"column:status;type:varchar(50);not null" json:"status"` // ongoing, submitted
-	StudentID    int64      `gorm:"column:student_id;not null" json:"studentId"`
-	TestID       int64      `gorm:"column:test_id;not null" json:"testId"`
-	Slug         string     `gorm:"column:slug;type:varchar(100);unique" json:"slug"`
+	ID          int64      `gorm:"primaryKey;column:id" json:"id"`
+	StartedAt   time.Time  `gorm:"column:started_at;type:timestamp with time zone" json:"startedAt"`
+	SubmittedAt *time.Time `gorm:"column:submitted_at;type:timestamp with time zone" json:"submittedAt"`
+	Score       float64    `gorm:"column:score;type:numeric(6,2);not null" json:"score"`
+	Status      string     `gorm:"column:status;type:varchar(50);not null" json:"status"` // ongoing, submitted
+	StudentID   int64      `gorm:"column:student_id;not null" json:"studentId"`
+	TestID      int64      `gorm:"column:test_id;not null" json:"testId"`
+	Slug        string     `gorm:"column:slug;type:varchar(100);unique" json:"slug"`
 }
 
+// TableName matches the StudentTestAttempt struct to the "student_test_attempts" table.
 func (StudentTestAttempt) TableName() string {
 	return "student_test_attempts"
 }
 
-// StudentAnswer represents the student_answers table
+// StudentAnswer records a student's answer submission for a specific question.
 type StudentAnswer struct {
 	ID             int64   `gorm:"primaryKey;column:id" json:"id"`
 	SelectedAnswer *string `gorm:"column:selected_answer;type:text" json:"selectedAnswer"`
@@ -143,11 +151,12 @@ type StudentAnswer struct {
 	AttemptID      int64   `gorm:"column:attempt_id;not null" json:"attemptId"`
 }
 
+// TableName matches the StudentAnswer struct to the "student_answers" table.
 func (StudentAnswer) TableName() string {
 	return "student_answers"
 }
 
-// TestResult represents the test_results table
+// TestResult calculates final scores, accuracy, and ranking metrics upon test submission.
 type TestResult struct {
 	ID                  int64     `gorm:"primaryKey;column:id" json:"id"`
 	Score               float64   `gorm:"column:score;type:numeric(6,2);not null" json:"score"`
@@ -161,11 +170,12 @@ type TestResult struct {
 	AttemptID           int64     `gorm:"column:attempt_id;not null" json:"attemptId"`
 }
 
+// TableName matches the TestResult struct to the "test_results" table.
 func (TestResult) TableName() string {
 	return "test_results"
 }
 
-// TestSeriesAccess represents the test_series_accesses table
+// TestSeriesAccess records manual test series purchases or permissions.
 type TestSeriesAccess struct {
 	ID           int64     `gorm:"primaryKey;column:id" json:"id"`
 	CreatedAt    time.Time `gorm:"column:created_at;type:timestamp with time zone;autoCreateTime" json:"createdAt"`
@@ -173,10 +183,12 @@ type TestSeriesAccess struct {
 	TestSeriesID int64     `gorm:"column:test_series_id;not null" json:"testSeriesId"`
 }
 
+// TableName matches the TestSeriesAccess struct to the "test_series_accesses" table.
 func (TestSeriesAccess) TableName() string {
 	return "test_series_accesses"
 }
 
+// AttemptMonitorData holds active attempt status metrics for real-time monitoring.
 type AttemptMonitorData struct {
 	ID           int64       `json:"id"`
 	StudentID    int64       `json:"studentId"`
@@ -189,6 +201,7 @@ type AttemptMonitorData struct {
 	Result       *TestResult `json:"result"`
 }
 
+// CbtExamRepository defines SQL query contracts. Implemented in the repository layer.
 type CbtExamRepository interface {
 	GetTestByIDOrSlug(ctx context.Context, idOrSlug string) (*Test, error)
 	GetTestSeriesByIDOrSlug(ctx context.Context, idOrSlug string) (*TestSeries, error)
@@ -217,6 +230,7 @@ type CbtExamRepository interface {
 	GetAttemptsMonitoring(ctx context.Context, testID int64) ([]AttemptMonitorData, error)
 }
 
+// CbtExamUsecase defines business validation orchestrations. Implemented in the usecase layer.
 type CbtExamUsecase interface {
 	StartAttempt(ctx context.Context, userID int64, testIDOrSlug string) (*StudentTestAttempt, []Question, error)
 	SubmitAnswer(ctx context.Context, userID int64, attemptSlug string, questionID int64, selectedAnswer string) (*StudentAnswer, error)
@@ -227,3 +241,4 @@ type CbtExamUsecase interface {
 	GetAttemptsMonitoring(ctx context.Context, userID int64, testIDStr string) (map[string]interface{}, error)
 	GetTestByIDOrSlug(ctx context.Context, idOrSlug string) (*Test, error)
 }
+

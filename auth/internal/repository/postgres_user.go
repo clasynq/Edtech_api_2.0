@@ -12,25 +12,29 @@ import (
 	"gorm.io/gorm"
 )
 
+// postgresUserRepository implements domain.UserRepository interface for PostgreSQL using GORM.
 type postgresUserRepository struct {
 	db *gorm.DB
 }
 
+// NewPostgresUserRepository instantiates a repository layer object injecting the GORM database connection.
 func NewPostgresUserRepository(db *gorm.DB) domain.UserRepository {
 	return &postgresUserRepository{db: db}
 }
 
+// GetUserByID retrieves a primary User profile record using its numeric ID.
 func (r *postgresUserRepository) GetUserByID(ctx context.Context, id int64) (*domain.User, error) {
 	var user domain.User
 	if err := r.db.WithContext(ctx).First(&user, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
+			return nil, nil // Return nil with no error if user does not exist
 		}
 		return nil, err
 	}
 	return &user, nil
 }
 
+// GetUserByEmail locates a User profile record by email using a case-insensitive lookup.
 func (r *postgresUserRepository) GetUserByEmail(ctx context.Context, email string) (*domain.User, error) {
 	var user domain.User
 	if err := r.db.WithContext(ctx).Where("LOWER(email) = ?", strings.ToLower(email)).First(&user).Error; err != nil {
@@ -42,6 +46,7 @@ func (r *postgresUserRepository) GetUserByEmail(ctx context.Context, email strin
 	return &user, nil
 }
 
+// GetUserByUsername locates a User profile record by username using a case-insensitive lookup.
 func (r *postgresUserRepository) GetUserByUsername(ctx context.Context, username string) (*domain.User, error) {
 	var user domain.User
 	if err := r.db.WithContext(ctx).Where("LOWER(username) = ?", strings.ToLower(username)).First(&user).Error; err != nil {
@@ -53,6 +58,7 @@ func (r *postgresUserRepository) GetUserByUsername(ctx context.Context, username
 	return &user, nil
 }
 
+// GetUserByContact retrieves a User profile record by their verified contact number.
 func (r *postgresUserRepository) GetUserByContact(ctx context.Context, contact string) (*domain.User, error) {
 	var user domain.User
 	if err := r.db.WithContext(ctx).Where("contact_number = ?", contact).First(&user).Error; err != nil {
@@ -64,6 +70,7 @@ func (r *postgresUserRepository) GetUserByContact(ctx context.Context, contact s
 	return &user, nil
 }
 
+// SearchUsers performs a case-insensitive wild card search on full_name, username, or email.
 func (r *postgresUserRepository) SearchUsers(ctx context.Context, query string) ([]domain.User, error) {
 	var users []domain.User
 	q := "%" + strings.ToLower(query) + "%"
@@ -74,10 +81,13 @@ func (r *postgresUserRepository) SearchUsers(ctx context.Context, query string) 
 	return users, err
 }
 
+// UpdateUser persists changes to a User entity in the database.
 func (r *postgresUserRepository) UpdateUser(ctx context.Context, user *domain.User) error {
 	return r.db.WithContext(ctx).Save(user).Error
 }
 
+// IsStudent checks if the user has a valid active student relationship.
+// It verifies student record presence and cross-checks associated tables (enrollments, note_accesses, test_series_accesses).
 func (r *postgresUserRepository) IsStudent(ctx context.Context, userID int64) (bool, error) {
 	var studentID int64
 	err := r.db.WithContext(ctx).Table("students").Where("user_id = ?", userID).Pluck("id", &studentID).Error
@@ -103,9 +113,11 @@ func (r *postgresUserRepository) IsStudent(ctx context.Context, userID int64) (b
 		return false, err
 	}
 
+	// Active students must have at least one enrollment, note access or test series purchase/access
 	return (enrollCount + noteCount + testCount) > 0, nil
 }
 
+// GetStudentProfile retrieves the student model record and preloads the associated primary user profile data.
 func (r *postgresUserRepository) GetStudentProfile(ctx context.Context, userID int64) (*domain.Student, error) {
 	var student domain.Student
 	if err := r.db.WithContext(ctx).Preload("User").Where("user_id = ?", userID).First(&student).Error; err != nil {
@@ -117,6 +129,7 @@ func (r *postgresUserRepository) GetStudentProfile(ctx context.Context, userID i
 	return &student, nil
 }
 
+// GetStudentReferralsCount fetches the count of unique students that completed a purchase using this user's referral code.
 func (r *postgresUserRepository) GetStudentReferralsCount(ctx context.Context, userID int64) (int64, error) {
 	var count int64
 	err := r.db.WithContext(ctx).Table("payment_orders").
@@ -129,6 +142,7 @@ func (r *postgresUserRepository) GetStudentReferralsCount(ctx context.Context, u
 	return count, nil
 }
 
+// GetAdminByEmail retrieves an administrative account record by email using a case-insensitive lookup.
 func (r *postgresUserRepository) GetAdminByEmail(ctx context.Context, email string) (*domain.Admin, error) {
 	var admin domain.Admin
 	if err := r.db.WithContext(ctx).Where("LOWER(email) = ?", strings.ToLower(email)).First(&admin).Error; err != nil {
@@ -140,6 +154,7 @@ func (r *postgresUserRepository) GetAdminByEmail(ctx context.Context, email stri
 	return &admin, nil
 }
 
+// GetTeacherByEmail retrieves a teacher record by email using a case-insensitive lookup.
 func (r *postgresUserRepository) GetTeacherByEmail(ctx context.Context, email string) (*domain.Teacher, error) {
 	var teacher domain.Teacher
 	if err := r.db.WithContext(ctx).Where("LOWER(email) = ?", strings.ToLower(email)).First(&teacher).Error; err != nil {
@@ -151,6 +166,7 @@ func (r *postgresUserRepository) GetTeacherByEmail(ctx context.Context, email st
 	return &teacher, nil
 }
 
+// GetTeacherByID retrieves a teacher record by its numeric ID.
 func (r *postgresUserRepository) GetTeacherByID(ctx context.Context, id int64) (*domain.Teacher, error) {
 	var teacher domain.Teacher
 	if err := r.db.WithContext(ctx).First(&teacher, id).Error; err != nil {
@@ -162,6 +178,7 @@ func (r *postgresUserRepository) GetTeacherByID(ctx context.Context, id int64) (
 	return &teacher, nil
 }
 
+// GetAdminByID retrieves an admin record by its numeric ID.
 func (r *postgresUserRepository) GetAdminByID(ctx context.Context, id int64) (*domain.Admin, error) {
 	var admin domain.Admin
 	if err := r.db.WithContext(ctx).First(&admin, id).Error; err != nil {
@@ -173,6 +190,7 @@ func (r *postgresUserRepository) GetAdminByID(ctx context.Context, id int64) (*d
 	return &admin, nil
 }
 
+// GetPendingRegistration retrieves the staged (not yet verified) signup record by email.
 func (r *postgresUserRepository) GetPendingRegistration(ctx context.Context, email string) (*domain.PendingRegistration, error) {
 	var pending domain.PendingRegistration
 	if err := r.db.WithContext(ctx).Where("LOWER(email) = ?", strings.ToLower(email)).First(&pending).Error; err != nil {
@@ -184,16 +202,20 @@ func (r *postgresUserRepository) GetPendingRegistration(ctx context.Context, ema
 	return &pending, nil
 }
 
+// SavePendingRegistration updates or creates a staged pending signup verification record.
 func (r *postgresUserRepository) SavePendingRegistration(ctx context.Context, pending *domain.PendingRegistration) error {
 	pending.Email = strings.ToLower(pending.Email)
 	pending.Username = strings.ToLower(pending.Username)
 	return r.db.WithContext(ctx).Save(pending).Error
 }
 
+// DeletePendingRegistration removes the staged pending signup record after OTP verification or timeout expiration.
 func (r *postgresUserRepository) DeletePendingRegistration(ctx context.Context, email string) error {
 	return r.db.WithContext(ctx).Where("LOWER(email) = ?", strings.ToLower(email)).Delete(&domain.PendingRegistration{}).Error
 }
 
+// generateReferralCode creates a unique 8-character referral key prefixed with "CSQ-"
+// It auto-retries code generation if a collision occurs in the database.
 func generateReferralCode(tx *gorm.DB) string {
 	const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	for {
@@ -204,12 +226,15 @@ func generateReferralCode(tx *gorm.DB) string {
 		}
 		code := "CSQ-" + string(result)
 		var count int64
+		// Check for uniqueness of referral code
 		if err := tx.Model(&domain.User{}).Where("referral_code = ?", code).Count(&count).Error; err == nil && count == 0 {
 			return code
 		}
 	}
 }
 
+// CreateUserFromPending promotes a pending registration into a live User and creates their Student profile.
+// This is executed as a single atomic database Transaction to guarantee consistency.
 func (r *postgresUserRepository) CreateUserFromPending(ctx context.Context, pending *domain.PendingRegistration) (*domain.User, error) {
 	var user domain.User
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -222,12 +247,12 @@ func (r *postgresUserRepository) CreateUserFromPending(ctx context.Context, pend
 			ReferralCode:  generateReferralCode(tx),
 		}
 
-		// Save User
+		// 1. Create primary User account record
 		if err := tx.Create(&user).Error; err != nil {
 			return err
 		}
 
-		// Save Student profile
+		// 2. Create sub-domain Student profile record linking to the user ID
 		student := domain.Student{
 			UserID: user.ID,
 		}
@@ -235,7 +260,7 @@ func (r *postgresUserRepository) CreateUserFromPending(ctx context.Context, pend
 			return err
 		}
 
-		// Delete pending registration
+		// 3. Clean up the pending verification record
 		if err := tx.Where("LOWER(email) = ?", strings.ToLower(pending.Email)).Delete(&domain.PendingRegistration{}).Error; err != nil {
 			return err
 		}
@@ -248,6 +273,7 @@ func (r *postgresUserRepository) CreateUserFromPending(ctx context.Context, pend
 	return &user, nil
 }
 
+// GetPasswordResetOTP retrieves the password reset token information by email.
 func (r *postgresUserRepository) GetPasswordResetOTP(ctx context.Context, email string) (*domain.PasswordResetOTP, error) {
 	var otp domain.PasswordResetOTP
 	if err := r.db.WithContext(ctx).Where("LOWER(email) = ?", strings.ToLower(email)).First(&otp).Error; err != nil {
@@ -259,15 +285,18 @@ func (r *postgresUserRepository) GetPasswordResetOTP(ctx context.Context, email 
 	return &otp, nil
 }
 
+// SavePasswordResetOTP updates or creates a password reset token verification record.
 func (r *postgresUserRepository) SavePasswordResetOTP(ctx context.Context, reset *domain.PasswordResetOTP) error {
 	reset.Email = strings.ToLower(reset.Email)
 	return r.db.WithContext(ctx).Save(reset).Error
 }
 
+// DeletePasswordResetOTP removes the password reset record after successful verification or expiration.
 func (r *postgresUserRepository) DeletePasswordResetOTP(ctx context.Context, email string) error {
 	return r.db.WithContext(ctx).Where("LOWER(email) = ?", strings.ToLower(email)).Delete(&domain.PasswordResetOTP{}).Error
 }
 
+// GetFollowRelationship checks if followerID is actively following followedID.
 func (r *postgresUserRepository) GetFollowRelationship(ctx context.Context, followerID, followedID int64) (*domain.Follow, error) {
 	var follow domain.Follow
 	if err := r.db.WithContext(ctx).Where("follower_id = ? AND followed_id = ?", followerID, followedID).First(&follow).Error; err != nil {
@@ -279,6 +308,7 @@ func (r *postgresUserRepository) GetFollowRelationship(ctx context.Context, foll
 	return &follow, nil
 }
 
+// FollowUser establishes a follower-following relationship record.
 func (r *postgresUserRepository) FollowUser(ctx context.Context, followerID, followedID int64) error {
 	follow := domain.Follow{
 		FollowerID: followerID,
@@ -287,24 +317,32 @@ func (r *postgresUserRepository) FollowUser(ctx context.Context, followerID, fol
 	return r.db.WithContext(ctx).Create(&follow).Error
 }
 
+// UnfollowUser removes a follower-following relationship record.
 func (r *postgresUserRepository) UnfollowUser(ctx context.Context, followerID, followedID int64) error {
 	return r.db.WithContext(ctx).Where("follower_id = ? AND followed_id = ?", followerID, followedID).Delete(&domain.Follow{}).Error
 }
 
+// GetFollowersList retrieves the list of users following the target userID, preloading follower profiles.
 func (r *postgresUserRepository) GetFollowersList(ctx context.Context, userID int64) ([]domain.Follow, error) {
 	var follows []domain.Follow
 	err := r.db.WithContext(ctx).Preload("Follower").Where("followed_id = ?", userID).Find(&follows).Error
 	return follows, err
 }
 
+// GetFollowingList retrieves the list of users the target userID is following, preloading followed profiles.
 func (r *postgresUserRepository) GetFollowingList(ctx context.Context, userID int64) ([]domain.Follow, error) {
 	var follows []domain.Follow
 	err := r.db.WithContext(ctx).Preload("Followed").Where("follower_id = ?", userID).Find(&follows).Error
 	return follows, err
 }
+
+// GetNotifications fetches system notification logs for a specific recipient, preloading sender detail records.
+// It resolves polymorphic sender names and avatar images from respective target tables (users, teachers, admins).
 func (r *postgresUserRepository) GetNotifications(ctx context.Context, userID int64, role string) ([]domain.UserNotification, error) {
 	var notifications []domain.UserNotification
 	var err error
+	
+	// Students and Users share notification scopes
 	if role == "student" || role == "user" {
 		err = r.db.WithContext(ctx).Preload("Sender").Where("recipient_id = ? AND recipient_role IN ('student', 'user')", userID).Order("created_at desc").Find(&notifications).Error
 	} else {
@@ -314,6 +352,7 @@ func (r *postgresUserRepository) GetNotifications(ctx context.Context, userID in
 		return nil, err
 	}
 
+	// Resolve polymorphic sender details (User, Teacher, or Admin) dynamically.
 	for i := range notifications {
 		if notifications[i].SenderID != nil {
 			senderID := *notifications[i].SenderID
@@ -333,7 +372,7 @@ func (r *postgresUserRepository) GetNotifications(ctx context.Context, userID in
 				notifications[i].SenderName = notifications[i].Sender.FullName
 				notifications[i].SenderAvatarUrl = notifications[i].Sender.AvatarURL
 			} else {
-				// Try teachers table
+				// Fallback: check if the sender is recorded in the teachers table
 				var teacher struct {
 					Name     string
 					PhotoURL string
@@ -342,7 +381,7 @@ func (r *postgresUserRepository) GetNotifications(ctx context.Context, userID in
 					notifications[i].SenderName = teacher.Name
 					notifications[i].SenderAvatarUrl = teacher.PhotoURL
 				} else {
-					// Try admin table
+					// Fallback: check if the sender is recorded in the admin table
 					var admin struct {
 						Email string
 					}
@@ -361,6 +400,7 @@ func (r *postgresUserRepository) GetNotifications(ctx context.Context, userID in
 	return notifications, nil
 }
 
+// MarkNotificationsAsRead flags all notifications for a specific user role as read.
 func (r *postgresUserRepository) MarkNotificationsAsRead(ctx context.Context, userID int64, role string) error {
 	if role == "student" || role == "user" {
 		return r.db.WithContext(ctx).Model(&domain.UserNotification{}).Where("recipient_id = ? AND recipient_role IN ('student', 'user')", userID).Update("is_read", true).Error
@@ -368,15 +408,19 @@ func (r *postgresUserRepository) MarkNotificationsAsRead(ctx context.Context, us
 	return r.db.WithContext(ctx).Model(&domain.UserNotification{}).Where("recipient_id = ? AND recipient_role = ?", userID, role).Update("is_read", true).Error
 }
 
+// CreateNotification logs a system notification event in the database.
 func (r *postgresUserRepository) CreateNotification(ctx context.Context, notif *domain.UserNotification) error {
 	return r.db.WithContext(ctx).Create(notif).Error
 }
 
+// UpdateAdminPassword updates an admin's password hash in the database.
 func (r *postgresUserRepository) UpdateAdminPassword(ctx context.Context, id int64, newHash string) error {
 	return r.db.WithContext(ctx).Model(&domain.Admin{}).Where("id = ?", id).Update("password", newHash).Error
 }
 
+// UpdateTeacherPassword updates a teacher's password hash in the database.
 func (r *postgresUserRepository) UpdateTeacherPassword(ctx context.Context, id int64, newHash string) error {
 	return r.db.WithContext(ctx).Model(&domain.Teacher{}).Where("id = ?", id).Update("password", newHash).Error
 }
+
 

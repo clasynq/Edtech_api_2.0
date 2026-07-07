@@ -12,19 +12,23 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// DjangoClaims holds JWT payload parameters. Designed specifically to match the structure
+// of Django's Simple JWT library, facilitating authentication sharing across microservices.
 type DjangoClaims struct {
-	SubKind    string `json:"sub_kind"`
-	SubID      int64  `json:"sub_id"`
-	UserID     int64  `json:"user_id"`
-	Role       string `json:"role"`
-	TokenType  string `json:"token_type"`
-	RefreshJTI string `json:"refresh_jti,omitempty"`
+	SubKind    string `json:"sub_kind"`             // Subject kind (e.g. admin, student, teacher)
+	SubID      int64  `json:"sub_id"`               // Subject primary key ID
+	UserID     int64  `json:"user_id"`              // Legacy User table reference (for backward compatibility)
+	Role       string `json:"role"`                 // Assigned access permissions role
+	TokenType  string `json:"token_type"`           // "access" or "refresh"
+	RefreshJTI string `json:"refresh_jti,omitempty"` // Unique identifier for whitelisting refresh tokens
 	jwt.RegisteredClaims
 }
 
+// VerifyToken decodes, parses, and validates the signature of a signed JWT string against secretKey.
 func VerifyToken(tokenStr string, secretKey string) (*DjangoClaims, error) {
 	claims := &DjangoClaims{}
 	token, err := jwt.ParseWithClaims(tokenStr, claims, func(token *jwt.Token) (interface{}, error) {
+		// Enforce standard HMAC-SHA256 signature verification method
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
@@ -42,6 +46,7 @@ func VerifyToken(tokenStr string, secretKey string) (*DjangoClaims, error) {
 	return claims, nil
 }
 
+// AuthMiddleware intercepts HTTP requests to parse, validate, and check whitelisted active sessions from Redis.
 func AuthMiddleware(secretKey string, rdb *redis.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
@@ -72,7 +77,7 @@ func AuthMiddleware(secretKey string, rdb *redis.Client) gin.HandlerFunc {
 			return
 		}
 
-		// Enforce Redis active session limit checks
+		// Enforce Redis active session limit checks to verify session has not been superseded
 		if rdb != nil {
 			redisKey := fmt.Sprintf("active_sessions:%s:%d", claims.SubKind, claims.SubID)
 			val, err := rdb.Get(c.Request.Context(), redisKey).Result()
@@ -102,7 +107,8 @@ func AuthMiddleware(secretKey string, rdb *redis.Client) gin.HandlerFunc {
 	}
 }
 
-// OptionalAuthMiddleware parses the JWT if present, but doesn't abort if it's missing
+// OptionalAuthMiddleware parses the JWT if present, but lets the request proceed without error if missing.
+// This is essential to feed lists or article details where guests receive generic results and users receive personalized results.
 func OptionalAuthMiddleware(secretKey string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
@@ -120,6 +126,7 @@ func OptionalAuthMiddleware(secretKey string) gin.HandlerFunc {
 	}
 }
 
+// RequireAdmin blocks access if the injected role key doesn't equal "admin".
 func RequireAdmin() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		role, exists := c.Get("role")
@@ -135,3 +142,4 @@ func RequireAdmin() gin.HandlerFunc {
 		c.Next()
 	}
 }
+

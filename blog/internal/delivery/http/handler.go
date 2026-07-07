@@ -16,12 +16,14 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// HttpHandler handles HTTP requests for the Blog microservice.
 type HttpHandler struct {
 	usecase   domain.BlogUsecase
-	mediaRoot string
-	baseURL   string
+	mediaRoot string // Root path to store static uploaded resources (e.g. "./media")
+	baseURL   string // Server base URL used to compile full image URL paths
 }
 
+// NewHttpHandler initializes the blog HttpHandler.
 func NewHttpHandler(usecase domain.BlogUsecase, mediaRoot string, baseURL string) *HttpHandler {
 	return &HttpHandler{
 		usecase:   usecase,
@@ -30,6 +32,7 @@ func NewHttpHandler(usecase domain.BlogUsecase, mediaRoot string, baseURL string
 	}
 }
 
+// RegisterRoutes registers endpoints to Gin groups.
 func (h *HttpHandler) RegisterRoutes(r *gin.Engine, authMiddleware gin.HandlerFunc, optionalAuth gin.HandlerFunc) {
 	api := r.Group("/api/blog")
 	{
@@ -120,6 +123,7 @@ func (h *HttpHandler) RegisterRoutes(r *gin.Engine, authMiddleware gin.HandlerFu
 	}
 }
 
+// getUserIDFromCtx retrieves the user ID from the Gin context.
 func getUserIDFromCtx(c *gin.Context) int64 {
 	val, exists := c.Get("userID")
 	if !exists {
@@ -131,6 +135,7 @@ func getUserIDFromCtx(c *gin.Context) int64 {
 	return 0
 }
 
+// GetFeed lists, sorts, and paginates feed items.
 func (h *HttpHandler) GetFeed(c *gin.Context) {
 	userID := getUserIDFromCtx(c)
 	category := c.Query("category")
@@ -163,6 +168,7 @@ func (h *HttpHandler) GetFeed(c *gin.Context) {
 	c.JSON(http.StatusOK, res)
 }
 
+// GetPostDetail returns article details by slug.
 func (h *HttpHandler) GetPostDetail(c *gin.Context) {
 	userID := getUserIDFromCtx(c)
 	slug := c.Param("slug")
@@ -188,6 +194,7 @@ type createPostReq struct {
 	VideoURL    string `json:"videoUrl"`
 }
 
+// CreatePost creates a new blog post. Supports both JSON payloads and multipart/form-data with banner file uploads.
 func (h *HttpHandler) CreatePost(c *gin.Context) {
 	userID := getUserIDFromCtx(c)
 	var req createPostReq
@@ -248,6 +255,7 @@ func (h *HttpHandler) CreatePost(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
 		return
+
 	}
 
 	c.JSON(http.StatusCreated, res)

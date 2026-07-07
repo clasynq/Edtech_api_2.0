@@ -27,7 +27,8 @@ func NewBlogUsecase(repo domain.BlogRepository, rdb *redis.Client) domain.BlogUs
 	}
 }
 
-// Helper to generate slug from title
+// slugify generates a URL-friendly slug from the provided title string,
+// sanitizing non-alphanumeric characters and appending a unique nanosecond suffix to avoid naming conflicts.
 func slugify(title string) string {
 	slug := strings.ToLower(title)
 	// Replace non-alphanumeric characters with hyphens
@@ -40,7 +41,8 @@ func slugify(title string) string {
 	return slug + uniqueSuffix
 }
 
-// Log user activity to database
+
+// logActivity pushes audit entries documenting user actions into the activity_logs database table.
 func (u *blogUsecase) logActivity(ctx context.Context, userID int64, activityType, description, targetLink, details string) {
 	log := &domain.ActivityLog{
 		UserID:       userID,
@@ -57,6 +59,9 @@ func (u *blogUsecase) logActivity(ctx context.Context, userID int64, activityTyp
 	_ = u.repo.CreateActivityLog(ctx, log)
 }
 
+
+// GetFeed loads, ranks, and filters blog feed items based on category, queries, follow tags, and personalization scoring.
+// Supports Redis caching for guest visitors (userID == 0) to reduce database load.
 func (u *blogUsecase) GetFeed(ctx context.Context, userID int64, category string, query string, cursorStr string, tab string, limit int) (map[string]interface{}, error) {
 	cacheKey := fmt.Sprintf("blog_feed_guest:cat:%s:query:%s:cursor:%s:tab:%s:lim:%d", category, query, cursorStr, tab, limit)
 	if u.rdb != nil && userID == 0 {
@@ -74,6 +79,7 @@ func (u *blogUsecase) GetFeed(ctx context.Context, userID int64, category string
 			cursorTime = t
 		}
 	}
+
 
 	// Pull 5x limit to rank the most relevant items efficiently (smart scoring candidate pool)
 	candidateLimit := limit * 5
@@ -221,12 +227,15 @@ func (u *blogUsecase) GetFeed(ctx context.Context, userID int64, category string
 	return res, nil
 }
 
+// GetPostDetail returns the single BlogPost detail preloaded with authors and threaded replies.
+// Automatically triggers asynchronous views incrementing background routines for guests, or synchronous logging for users.
 func (u *blogUsecase) GetPostDetail(ctx context.Context, userID int64, slug string, viewerIP string) (map[string]interface{}, error) {
 	cacheKey := fmt.Sprintf("blog_post_detail_guest:%s", slug)
 	if u.rdb != nil && userID == 0 {
 		if val, err := u.rdb.Get(ctx, cacheKey).Result(); err == nil {
 			var cached map[string]interface{}
 			if err := json.Unmarshal([]byte(val), &cached); err == nil {
+
 				// Safely extract post ID from cached payload
 				var postID int64
 				if postMap, ok := cached["post"].(map[string]interface{}); ok {
@@ -315,12 +324,14 @@ func (u *blogUsecase) GetPostDetail(ctx context.Context, userID int64, slug stri
 	return res, nil
 }
 
+// CreatePost inserts a new blog entry, generating unique slugs and logging action timelines.
 func (u *blogUsecase) CreatePost(ctx context.Context, userID int64, title, excerpt, content, category, bannerURL, exploreLink, imageURL, videoURL string) (map[string]interface{}, error) {
 	if len(content) > 60000 {
 		return nil, errors.New("Content is too long. Maximum limit is 60,000 characters.")
 	}
 
 	slug := slugify(title)
+
 	post := &domain.BlogPost{
 		Title:        title,
 		Slug:         slug,
@@ -362,6 +373,7 @@ func (u *blogUsecase) CreatePost(ctx context.Context, userID int64, title, excer
 	}, nil
 }
 
+// UpdatePost updates blog attributes, validating author permissions first.
 func (u *blogUsecase) UpdatePost(ctx context.Context, userID int64, slug string, updates map[string]interface{}) (map[string]interface{}, error) {
 	post, err := u.repo.GetPostBySlug(ctx, slug)
 	if err != nil {
@@ -370,6 +382,7 @@ func (u *blogUsecase) UpdatePost(ctx context.Context, userID int64, slug string,
 	if post == nil {
 		return nil, errors.New("Article not found.")
 	}
+
 
 	if post.AuthorID != userID {
 		return nil, errors.New("You are not authorized to edit this article.")
@@ -436,6 +449,7 @@ func (u *blogUsecase) UpdatePost(ctx context.Context, userID int64, slug string,
 	}, nil
 }
 
+// DeletePost removes a post and clears its bookmarks/likes/views.
 func (u *blogUsecase) DeletePost(ctx context.Context, userID int64, slug string) error {
 	post, err := u.repo.GetPostBySlug(ctx, slug)
 	if err != nil {
@@ -444,6 +458,7 @@ func (u *blogUsecase) DeletePost(ctx context.Context, userID int64, slug string)
 	if post == nil {
 		return errors.New("Article not found.")
 	}
+
 
 	if post.AuthorID != userID {
 		return errors.New("You are not authorized to delete this article.")
@@ -461,6 +476,7 @@ func (u *blogUsecase) DeletePost(ctx context.Context, userID int64, slug string)
 	return nil
 }
 
+// ToggleLike likes or unlikes a post, checking Redis lock limits to prevent spam reactions.
 func (u *blogUsecase) ToggleLike(ctx context.Context, userID, postID int64) (map[string]interface{}, error) {
 	post, err := u.repo.GetPostByID(ctx, postID)
 	if err != nil {
@@ -469,6 +485,7 @@ func (u *blogUsecase) ToggleLike(ctx context.Context, userID, postID int64) (map
 	if post == nil {
 		return nil, errors.New("Article not found.")
 	}
+
 
 	if u.rdb != nil {
 		limitKey := fmt.Sprintf("blog_like_limit:%d:%d", userID, postID)
@@ -588,6 +605,7 @@ func (u *blogUsecase) ToggleRepost(ctx context.Context, userID, postID int64) (m
 	}, nil
 }
 
+// AddComment creates a comment and notifies the post author.
 func (u *blogUsecase) AddComment(ctx context.Context, userID, postID int64, content string, parentID *int64) (map[string]interface{}, error) {
 	post, err := u.repo.GetPostByID(ctx, postID)
 	if err != nil {
@@ -596,6 +614,7 @@ func (u *blogUsecase) AddComment(ctx context.Context, userID, postID int64, cont
 	if post == nil {
 		return nil, errors.New("Article not found.")
 	}
+
 
 	comment := &domain.BlogComment{
 		PostID:   postID,
@@ -815,6 +834,7 @@ func (u *blogUsecase) GetUserActivities(ctx context.Context, userID int64, limit
 	}, nil
 }
 
+// TrackPostView increments view counters, ignoring requests inside a 10-minute cooldown window.
 func (u *blogUsecase) TrackPostView(ctx context.Context, postID int64, viewerIdentifier string, userID int64) (int, error) {
 	post, err := u.repo.GetPostByID(ctx, postID)
 	if err != nil {
@@ -823,6 +843,7 @@ func (u *blogUsecase) TrackPostView(ctx context.Context, postID int64, viewerIde
 	if post == nil {
 		return 0, errors.New("Article not found.")
 	}
+
 
 	cooldownTime := time.Now().Add(-10 * time.Minute)
 	latestView, err := u.repo.GetLatestPostView(ctx, postID, viewerIdentifier)
@@ -872,6 +893,7 @@ func (u *blogUsecase) TrackPostView(ctx context.Context, postID int64, viewerIde
 	return post.ViewsCount, nil
 }
 
+// TrackPostEngagement increments the engagement score of a post based on active read time duration.
 func (u *blogUsecase) TrackPostEngagement(ctx context.Context, postID int64, readTimeSeconds int, viewerIdentifier string, userID int64) (float64, error) {
 	post, err := u.repo.GetPostByID(ctx, postID)
 	if err != nil {
@@ -880,6 +902,7 @@ func (u *blogUsecase) TrackPostEngagement(ctx context.Context, postID int64, rea
 	if post == nil {
 		return 0, errors.New("Article not found.")
 	}
+
 
 	latestView, err := u.repo.GetLatestPostView(ctx, postID, viewerIdentifier)
 	if err != nil {
@@ -915,10 +938,12 @@ func (u *blogUsecase) TrackPostEngagement(ctx context.Context, postID int64, rea
 	return post.EngagementScore, nil
 }
 
+// ToggleFollowUser adds or removes user follow relationship, preventing users from following themselves.
 func (u *blogUsecase) ToggleFollowUser(ctx context.Context, followerID, followedID int64) (bool, error) {
 	if followerID == followedID {
 		return false, errors.New("You cannot follow yourself.")
 	}
+
 
 	isFollowing, err := u.repo.ToggleFollowUser(ctx, followerID, followedID)
 	if err != nil {
@@ -933,6 +958,7 @@ func (u *blogUsecase) ToggleFollowUser(ctx context.Context, followerID, followed
 	return isFollowing, nil
 }
 
+// invalidateCache scans Redis using pattern matches and purges matching keys.
 func (u *blogUsecase) invalidateCache(ctx context.Context, patterns ...string) {
 	if u.rdb == nil {
 		return
@@ -944,6 +970,7 @@ func (u *blogUsecase) invalidateCache(ctx context.Context, patterns ...string) {
 		}
 	}
 }
+
 
 func (u *blogUsecase) invalidateBlogCache(ctx context.Context, slug string) {
 	patterns := []string{

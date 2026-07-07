@@ -10,6 +10,7 @@ import (
 	"strconv"
 )
 
+// SendEmail dispatches a simple plaintext email message over standard SMTP.
 func SendEmail(to, subject, bodyText, from, smtpHost, smtpPortStr, smtpUser, smtpPass string) error {
 	mime := "MIME-Version: 1.0\r\nContent-Type: text/plain; charset=\"utf-8\"\r\n"
 	message := fmt.Sprintf(
@@ -24,6 +25,7 @@ func SendEmail(to, subject, bodyText, from, smtpHost, smtpPortStr, smtpUser, smt
 	return sendSMTP(to, from, smtpHost, smtpPortStr, smtpUser, smtpPass, []byte(message))
 }
 
+// SendEmailWithAttachment sends a multipart/mixed email containing a message body and a base64 encoded attachment.
 func SendEmailWithAttachment(to, subject, bodyText, from, smtpHost, smtpPortStr, smtpUser, smtpPass, fileName string, fileData []byte) error {
 	buf := bytes.NewBuffer(nil)
 	buf.WriteString(fmt.Sprintf("From: %s\r\n", from))
@@ -34,7 +36,7 @@ func SendEmailWithAttachment(to, subject, bodyText, from, smtpHost, smtpPortStr,
 	writer := multipart.NewWriter(buf)
 	buf.WriteString(fmt.Sprintf("Content-Type: multipart/mixed; boundary=%s\r\n\r\n", writer.Boundary()))
 
-	// Body text part
+	// 1. Textual body part
 	textHeader := make(textproto.MIMEHeader)
 	textHeader.Set("Content-Type", "text/plain; charset=UTF-8")
 	textPart, err := writer.CreatePart(textHeader)
@@ -43,7 +45,7 @@ func SendEmailWithAttachment(to, subject, bodyText, from, smtpHost, smtpPortStr,
 	}
 	_, _ = textPart.Write([]byte(bodyText))
 
-	// Attachment part
+	// 2. Binary attachment part (encoded in Base64)
 	attachHeader := make(textproto.MIMEHeader)
 	attachHeader.Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, fileName))
 	attachHeader.Set("Content-Type", "application/pdf")
@@ -62,6 +64,7 @@ func SendEmailWithAttachment(to, subject, bodyText, from, smtpHost, smtpPortStr,
 	return sendSMTP(to, from, smtpHost, smtpPortStr, smtpUser, smtpPass, buf.Bytes())
 }
 
+// sendSMTP sets up credentials and plain auth, binding to port and dispatching mail data.
 func sendSMTP(to, from, smtpHost, smtpPortStr, smtpUser, smtpPass string, message []byte) error {
 	var auth smtp.Auth
 	if smtpUser != "" && smtpPass != "" {
@@ -76,3 +79,4 @@ func sendSMTP(to, from, smtpHost, smtpPortStr, smtpUser, smtpPass string, messag
 	addr := fmt.Sprintf("%s:%d", smtpHost, smtpPort)
 	return smtp.SendMail(addr, auth, from, []string{to}, message)
 }
+

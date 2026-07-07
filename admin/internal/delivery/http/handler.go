@@ -16,13 +16,15 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// HttpHandler maps REST routes to Admin Usecase executions.
 type HttpHandler struct {
 	usecase   domain.AdminUsecase
-	secretKey string
-	mediaRoot string
-	baseURL   string
+	secretKey string // Secret key to verify JWT signatures
+	mediaRoot string // Disk path to save file uploads statically
+	baseURL   string // Host URL (to build fully-qualified media URLs)
 }
 
+// NewHttpHandler initializes a new HttpHandler controller instance.
 func NewHttpHandler(usecase domain.AdminUsecase, secretKey, mediaRoot, baseURL string) *HttpHandler {
 	return &HttpHandler{
 		usecase:   usecase,
@@ -32,24 +34,25 @@ func NewHttpHandler(usecase domain.AdminUsecase, secretKey, mediaRoot, baseURL s
 	}
 }
 
+// RegisterRoutes sets up the HTTP paths for the admin panel microservice.
 func (h *HttpHandler) RegisterRoutes(r *gin.Engine, authMiddleware gin.HandlerFunc) {
 	api := r.Group("/api")
 	{
-		// Platform (General/Public)
+		// Platform routes (General/Public counters)
 		platform := api.Group("/platform")
 		{
 			platform.GET("/stats", h.GetPlatformStats)
 			platform.GET("/categories", h.GetPlatformCategories)
 		}
 
-		// Careers Public (General/Public)
+		// Careers Public routes (Job Listings & Application submissions)
 		careersPublic := api.Group("/careers")
 		{
 			careersPublic.GET("/positions", h.GetCareersPositions)
 			careersPublic.POST("/apply", h.SubmitJobApplication)
 		}
 
-		// Careers Admin (Authenticated + Admin required)
+		// Careers Admin routes (Authenticated + Require Admin role check)
 		careersAdmin := api.Group("/careers/admin")
 		careersAdmin.Use(authMiddleware, RequireAdmin())
 		{
@@ -61,7 +64,7 @@ func (h *HttpHandler) RegisterRoutes(r *gin.Engine, authMiddleware gin.HandlerFu
 			careersAdmin.DELETE("/positions/:id", h.DeleteJobPosition)
 		}
 
-		// Admin Specific (Requires Admin JWT role)
+		// Admin specific management actions (Requires Admin auth token validation)
 		admin := api.Group("/admin")
 		admin.Use(authMiddleware, RequireAdmin())
 		{
@@ -82,9 +85,10 @@ func (h *HttpHandler) RegisterRoutes(r *gin.Engine, authMiddleware gin.HandlerFu
 	}
 }
 
+// GetPlatformStats returns high-level metric counts for the public homepage.
 func (h *HttpHandler) GetPlatformStats(c *gin.Context) {
 	if c.Query("clear_cache") == "true" {
-		// handle clear cache
+		// Cache clearance behavior details.
 	}
 	res, err := h.usecase.GetPlatformStats(c.Request.Context())
 	if err != nil {
@@ -94,6 +98,7 @@ func (h *HttpHandler) GetPlatformStats(c *gin.Context) {
 	c.JSON(http.StatusOK, res)
 }
 
+// GetPlatformCategories lists category names for course selections.
 func (h *HttpHandler) GetPlatformCategories(c *gin.Context) {
 	res, err := h.usecase.GetPlatformCategories(c.Request.Context())
 	if err != nil {
@@ -103,6 +108,7 @@ func (h *HttpHandler) GetPlatformCategories(c *gin.Context) {
 	c.JSON(http.StatusOK, res)
 }
 
+// GetOverview returns counts (total students, total teachers, active courses) for admin panel dashboard cards.
 func (h *HttpHandler) GetOverview(c *gin.Context) {
 	res, err := h.usecase.GetOverview(c.Request.Context())
 	if err != nil {
@@ -112,6 +118,7 @@ func (h *HttpHandler) GetOverview(c *gin.Context) {
 	c.JSON(http.StatusOK, res)
 }
 
+// GetActivities returns admin audit trail activity logs.
 func (h *HttpHandler) GetActivities(c *gin.Context) {
 	res, err := h.usecase.GetActivities(c.Request.Context())
 	if err != nil {
@@ -121,6 +128,7 @@ func (h *HttpHandler) GetActivities(c *gin.Context) {
 	c.JSON(http.StatusOK, res)
 }
 
+// ListTeachers returns teacher profiles matching search or category filters.
 func (h *HttpHandler) ListTeachers(c *gin.Context) {
 	q := c.Query("q")
 	category := c.Query("category")
@@ -132,6 +140,7 @@ func (h *HttpHandler) ListTeachers(c *gin.Context) {
 	c.JSON(http.StatusOK, res)
 }
 
+// CreateTeacher registers a teacher profile from form data parameter bindings.
 func (h *HttpHandler) CreateTeacher(c *gin.Context) {
 	var teacher domain.Teacher
 	teacher.Email = strings.ToLower(strings.TrimSpace(c.PostForm("email")))
@@ -162,7 +171,7 @@ func (h *HttpHandler) CreateTeacher(c *gin.Context) {
 		teacher.Tasks = "[]"
 	}
 
-	// Handle photo upload
+	// Handle profile image upload if present.
 	_, _, err := c.Request.FormFile("photo")
 	if err == nil {
 		photoURL, err := h.saveFileLocally(c, "photo", "teachers")
@@ -188,6 +197,7 @@ func (h *HttpHandler) CreateTeacher(c *gin.Context) {
 	c.JSON(http.StatusCreated, res)
 }
 
+// UpdateTeacher modifies teacher profiles. Checks request Content-Type to support both raw JSON bodies and multipart form submissions.
 func (h *HttpHandler) UpdateTeacher(c *gin.Context) {
 	idStr := c.Param("id")
 	teacherID, err := strconv.ParseInt(idStr, 10, 64)
@@ -196,7 +206,6 @@ func (h *HttpHandler) UpdateTeacher(c *gin.Context) {
 		return
 	}
 
-	// Read fields from Form Data or JSON body
 	updates := make(map[string]interface{})
 
 	if strings.Contains(c.GetHeader("Content-Type"), "application/json") {
@@ -207,7 +216,6 @@ func (h *HttpHandler) UpdateTeacher(c *gin.Context) {
 			}
 		}
 	} else {
-		// Handle multipart form
 		_ = c.Request.ParseMultipartForm(32 << 20)
 		
 		if email := c.PostForm("email"); email != "" {
@@ -242,7 +250,7 @@ func (h *HttpHandler) UpdateTeacher(c *gin.Context) {
 		}
 	}
 
-	// Handle photo update
+	// Handle updated profile photo
 	_, _, err = c.Request.FormFile("photo")
 	if err == nil {
 		photoURL, err := h.saveFileLocally(c, "photo", "teachers")
@@ -260,6 +268,7 @@ func (h *HttpHandler) UpdateTeacher(c *gin.Context) {
 	c.JSON(http.StatusOK, res)
 }
 
+// DeleteTeacher removes a teacher profile. If complete query parameter is false, it unassigns them from a single course.
 func (h *HttpHandler) DeleteTeacher(c *gin.Context) {
 	idStr := c.Param("id")
 	teacherID, err := strconv.ParseInt(idStr, 10, 64)
@@ -282,6 +291,7 @@ func (h *HttpHandler) DeleteTeacher(c *gin.Context) {
 	c.JSON(http.StatusNoContent, nil)
 }
 
+// ListStudents returns student profile details matching name filters.
 func (h *HttpHandler) ListStudents(c *gin.Context) {
 	q := c.Query("q")
 	category := c.Query("category")
@@ -293,6 +303,7 @@ func (h *HttpHandler) ListStudents(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"students": res})
 }
 
+// GetSalesAnalysis returns monthly revenue breakdown metrics across courses, notes, and test series.
 func (h *HttpHandler) GetSalesAnalysis(c *gin.Context) {
 	month := c.Query("month")
 	category := c.Query("category")
@@ -304,6 +315,7 @@ func (h *HttpHandler) GetSalesAnalysis(c *gin.Context) {
 	c.JSON(http.StatusOK, res)
 }
 
+// ListCategories returns course categories sorted by name.
 func (h *HttpHandler) ListCategories(c *gin.Context) {
 	res, err := h.usecase.ListCategories(c.Request.Context())
 	if err != nil {
@@ -313,6 +325,7 @@ func (h *HttpHandler) ListCategories(c *gin.Context) {
 	c.JSON(http.StatusOK, res)
 }
 
+// GetCategory returns a single category by ID.
 func (h *HttpHandler) GetCategory(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
@@ -332,6 +345,7 @@ func (h *HttpHandler) GetCategory(c *gin.Context) {
 	c.JSON(http.StatusOK, res)
 }
 
+// CreateCategory adds a course category.
 func (h *HttpHandler) CreateCategory(c *gin.Context) {
 	var body struct {
 		Name string `json:"name" binding:"required"`
@@ -350,6 +364,7 @@ func (h *HttpHandler) CreateCategory(c *gin.Context) {
 	c.JSON(http.StatusCreated, res)
 }
 
+// UpdateCategory updates category settings.
 func (h *HttpHandler) UpdateCategory(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
@@ -375,6 +390,7 @@ func (h *HttpHandler) UpdateCategory(c *gin.Context) {
 	c.JSON(http.StatusOK, res)
 }
 
+// DeleteCategory deletes a category record.
 func (h *HttpHandler) DeleteCategory(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
@@ -391,6 +407,8 @@ func (h *HttpHandler) DeleteCategory(c *gin.Context) {
 	c.JSON(http.StatusNoContent, nil)
 }
 
+// saveFileLocally parses file headers, creates necessary folders under h.mediaRoot,
+// and saves files using a unique timestamp key to avoid filename collisions.
 func (h *HttpHandler) saveFileLocally(c *gin.Context, formFieldName, folder string) (string, error) {
 	file, header, err := c.Request.FormFile(formFieldName)
 	if err != nil {
@@ -423,6 +441,7 @@ func (h *HttpHandler) saveFileLocally(c *gin.Context, formFieldName, folder stri
 	return fmt.Sprintf("%s/media/%s", baseMediaURL, relPath), nil
 }
 
+// GetCareersPositions lists active job openings for applicant selection.
 func (h *HttpHandler) GetCareersPositions(c *gin.Context) {
 	list, err := h.usecase.ListActiveJobPositions(c.Request.Context())
 	if err != nil {
@@ -432,14 +451,19 @@ func (h *HttpHandler) GetCareersPositions(c *gin.Context) {
 	c.JSON(http.StatusOK, list)
 }
 
+// SubmitJobApplication handles candidate application submissions. It executes spam-prevention checks:
+// (1) Honeypot check (hidden field middle_name must be blank).
+// (2) Link checks (fields must not contain promotional hyperlinks).
+// (3) Phone number format verification (only numbers/symbols).
+// (4) File size and extension constraints (resume <= 200KB PDF, photo <= 100KB JPEG/PNG).
 func (h *HttpHandler) SubmitJobApplication(c *gin.Context) {
-	// Honeypot spam check
+	// 1. Honeypot check
 	if c.PostForm("middle_name") != "" {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid submission."})
 		return
 	}
 
-	// Link/URL spam markers check
+	// 2. Link/HTML hyperlink spam check
 	spamMarkers := []string{"http://", "https://", "www.", "<a href=", "[url="}
 	textFields := []string{"full_name", "qualification", "branch", "apply_for_role", "specialization"}
 	for _, field := range textFields {
@@ -452,7 +476,7 @@ func (h *HttpHandler) SubmitJobApplication(c *gin.Context) {
 		}
 	}
 
-	// Phone number validation (only numeric, space, basic symbols)
+	// 3. Phone validation
 	phone := c.PostForm("phone")
 	if phone == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "phone is required"})
@@ -465,7 +489,7 @@ func (h *HttpHandler) SubmitJobApplication(c *gin.Context) {
 		}
 	}
 
-	// Check resume_file size & type
+	// 4. Resume size and format constraints (must be <= 200KB PDF)
 	resumeHeader, err := c.FormFile("resume_file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "resume_file is required"})
@@ -480,7 +504,7 @@ func (h *HttpHandler) SubmitJobApplication(c *gin.Context) {
 		return
 	}
 
-	// Check photo_file size & type
+	// 5. Photo size and format constraints (must be <= 100KB JPEG/PNG)
 	photoHeader, err := c.FormFile("photo_file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "photo_file is required"})
@@ -496,7 +520,7 @@ func (h *HttpHandler) SubmitJobApplication(c *gin.Context) {
 		return
 	}
 
-	// Save files
+	// Save files on disk
 	resumeURL, err := h.saveFileLocally(c, "resume_file", "careers/resumes")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to save resume: " + err.Error()})
@@ -509,7 +533,6 @@ func (h *HttpHandler) SubmitJobApplication(c *gin.Context) {
 		return
 	}
 
-	// Parse fields
 	var positionID *int64
 	posStr := c.PostForm("position")
 	if posStr != "" {
@@ -547,6 +570,7 @@ func (h *HttpHandler) SubmitJobApplication(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"message": "Application submitted successfully", "application": app})
 }
 
+// GetAdminPositions lists all careers openings for administration.
 func (h *HttpHandler) GetAdminPositions(c *gin.Context) {
 	list, err := h.usecase.GetAdminPositions(c.Request.Context())
 	if err != nil {
@@ -556,6 +580,7 @@ func (h *HttpHandler) GetAdminPositions(c *gin.Context) {
 	c.JSON(http.StatusOK, list)
 }
 
+// CreateJobPosition publishes a job opening position.
 func (h *HttpHandler) CreateJobPosition(c *gin.Context) {
 	var payload struct {
 		Title          string `json:"title" binding:"required"`
@@ -590,6 +615,7 @@ func (h *HttpHandler) CreateJobPosition(c *gin.Context) {
 	c.JSON(http.StatusCreated, jp)
 }
 
+// UpdateJobPosition updates specific details on a job opening position.
 func (h *HttpHandler) UpdateJobPosition(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
@@ -636,6 +662,7 @@ func (h *HttpHandler) UpdateJobPosition(c *gin.Context) {
 	c.JSON(http.StatusOK, jp)
 }
 
+// DeleteJobPosition deletes a job opening position record.
 func (h *HttpHandler) DeleteJobPosition(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
@@ -652,6 +679,7 @@ func (h *HttpHandler) DeleteJobPosition(c *gin.Context) {
 	c.JSON(http.StatusNoContent, nil)
 }
 
+// GetAdminApplications lists submitted applications for administration.
 func (h *HttpHandler) GetAdminApplications(c *gin.Context) {
 	list, err := h.usecase.ListJobApplications(c.Request.Context())
 	if err != nil {
@@ -661,6 +689,8 @@ func (h *HttpHandler) GetAdminApplications(c *gin.Context) {
 	c.JSON(http.StatusOK, list)
 }
 
+// SendCandidateNotification triggers recruitment updates (shortlisting, selection, rejection) to applicants.
+// If type is "selection", it validates and reads an attached Joining Letter PDF file (size <= 100KB).
 func (h *HttpHandler) SendCandidateNotification(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
@@ -715,4 +745,5 @@ func (h *HttpHandler) SendCandidateNotification(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Email sent successfully!"})
 }
+
 

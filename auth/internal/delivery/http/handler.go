@@ -10,6 +10,8 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// HttpHandler orchestrates incoming HTTP REST requests, binds inputs to structs,
+// validates Turnstile captcha protection, calls the core Usecases, and returns JSON payloads.
 type HttpHandler struct {
 	usecase            domain.UserUsecase
 	secretKey          string
@@ -17,6 +19,7 @@ type HttpHandler struct {
 	rdb                *redis.Client
 }
 
+// NewHttpHandler returns an instantiated HttpHandler injecting usecase, secrets, and redis references.
 func NewHttpHandler(usecase domain.UserUsecase, secretKey, turnstileSecretKey string, rdb *redis.Client) *HttpHandler {
 	return &HttpHandler{
 		usecase:            usecase,
@@ -26,9 +29,11 @@ func NewHttpHandler(usecase domain.UserUsecase, secretKey, turnstileSecretKey st
 	}
 }
 
+// RegisterRoutes sets up routing groups and links target paths to specific delivery handler functions.
 func (h *HttpHandler) RegisterRoutes(r *gin.Engine, authMiddleware gin.HandlerFunc) {
 	api := r.Group("/api")
 	{
+		// Public Authentication Endpoints
 		auth := api.Group("/auth")
 		{
 			auth.POST("/register", h.Register)
@@ -43,6 +48,7 @@ func (h *HttpHandler) RegisterRoutes(r *gin.Engine, authMiddleware gin.HandlerFu
 			auth.GET("/me", authMiddleware, h.GetMe)
 		}
 
+		// Private Profile and Follower Endpoints (require token verification)
 		me := api.Group("/me")
 		me.Use(authMiddleware)
 		{
@@ -68,6 +74,7 @@ func (h *HttpHandler) RegisterRoutes(r *gin.Engine, authMiddleware gin.HandlerFu
 	}
 }
 
+// registerReq holds JSON input mapping for student registrations.
 type registerReq struct {
 	FullName       string `json:"fullName" binding:"required"`
 	Username       string `json:"username" binding:"required"`
@@ -77,6 +84,7 @@ type registerReq struct {
 	TurnstileToken string `json:"turnstileToken"`
 }
 
+// Register handles user signups by verifying Cloudflare Turnstile token and calling the registration usecase.
 func (h *HttpHandler) Register(c *gin.Context) {
 	var req registerReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -90,6 +98,7 @@ func (h *HttpHandler) Register(c *gin.Context) {
 		turnstileToken = c.GetHeader("X-Turnstile-Token")
 	}
 
+	// Anti-spam Turnstile CAPTCHA validation check
 	if !utils.ValidateTurnstileToken(turnstileToken, remoteIP, h.turnstileSecretKey) {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":    "captcha_failed",
@@ -117,11 +126,13 @@ func (h *HttpHandler) Register(c *gin.Context) {
 	c.JSON(http.StatusAccepted, res)
 }
 
+// verifyOtpReq holds JSON input mapping for email OTP verification codes.
 type verifyOtpReq struct {
 	Email string `json:"email" binding:"required,email"`
 	Code  string `json:"code" binding:"required"`
 }
 
+// VerifyOTP validates registration codes. On success, it returns student profiles and JWT tokens.
 func (h *HttpHandler) VerifyOTP(c *gin.Context) {
 	var req verifyOtpReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -154,12 +165,14 @@ func (h *HttpHandler) VerifyOTP(c *gin.Context) {
 	c.JSON(http.StatusCreated, res)
 }
 
+// verifyLogin2FAReq holds JSON inputs for 2FA validation codes.
 type verifyLogin2FAReq struct {
 	Email string `json:"email" binding:"required,email"`
 	Code  string `json:"code" binding:"required"`
 	Role  string `json:"role" binding:"required"`
 }
 
+// VerifyLogin2FA verifies the 2FA code for Admins and Teachers.
 func (h *HttpHandler) VerifyLogin2FA(c *gin.Context) {
 	var req verifyLogin2FAReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -176,10 +189,12 @@ func (h *HttpHandler) VerifyLogin2FA(c *gin.Context) {
 	c.JSON(http.StatusOK, res)
 }
 
+// resendOtpReq holds JSON input mapping to request another registration OTP.
 type resendOtpReq struct {
 	Email string `json:"email" binding:"required,email"`
 }
 
+// ResendOTP triggers a new verification email code if the resend cooldown time has expired.
 func (h *HttpHandler) ResendOTP(c *gin.Context) {
 	var req resendOtpReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -210,6 +225,7 @@ func (h *HttpHandler) ResendOTP(c *gin.Context) {
 	c.JSON(http.StatusAccepted, res)
 }
 
+// loginReq holds credentials and Turnstile captcha validation parameters for logins.
 type loginReq struct {
 	Email          string `json:"email" binding:"required"`
 	Password       string `json:"password" binding:"required"`
@@ -217,6 +233,7 @@ type loginReq struct {
 	Role           string `json:"role"`
 }
 
+// Login verifies login credentials. It checks captcha tokens and determines if 2FA code is needed.
 func (h *HttpHandler) Login(c *gin.Context) {
 	var req loginReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -248,20 +265,23 @@ func (h *HttpHandler) Login(c *gin.Context) {
 	c.JSON(http.StatusOK, res)
 }
 
+// logoutReq holds JSON parameters to invalidate sessions.
 type logoutReq struct {
 	RefreshToken string `json:"refreshToken" binding:"required"`
 }
 
+// Logout processes user logouts. Client token revocation is handled by removing JTIs from Redis.
 func (h *HttpHandler) Logout(c *gin.Context) {
-	// Best-effort blacklist/session termination is handled by removing JTI from Redis
-	// Gin AuthMiddleware checks validity of JWT.
+	// JWT validations are handled in AuthMiddleware. Simply return NoContent success.
 	c.Status(http.StatusNoContent)
 }
 
+// refreshReq holds JSON parameters to request access token refreshes.
 type refreshReq struct {
 	RefreshToken string `json:"refreshToken" binding:"required"`
 }
 
+// Refresh handles token refresh cycles by validating the refresh token and issuing a new JWT pair.
 func (h *HttpHandler) Refresh(c *gin.Context) {
 	var req refreshReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -286,10 +306,12 @@ func (h *HttpHandler) Refresh(c *gin.Context) {
 	c.JSON(http.StatusOK, newTokens)
 }
 
+// forgotPasswordReq holds JSON parameters to trigger reset links.
 type forgotPasswordReq struct {
 	Email string `json:"email" binding:"required,email"`
 }
 
+// ForgotPassword validates account presence and sends password reset verification codes.
 func (h *HttpHandler) ForgotPassword(c *gin.Context) {
 	var req forgotPasswordReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -311,12 +333,14 @@ func (h *HttpHandler) ForgotPassword(c *gin.Context) {
 	c.JSON(http.StatusAccepted, res)
 }
 
+// resetPasswordReq holds parameters for password updates.
 type resetPasswordReq struct {
 	Email       string `json:"email" binding:"required,email"`
 	Code        string `json:"code" binding:"required"`
 	NewPassword string `json:"newPassword" binding:"required,min=6"`
 }
 
+// ResetPassword validates verification codes and updates password hashes.
 func (h *HttpHandler) ResetPassword(c *gin.Context) {
 	var req resetPasswordReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -347,6 +371,7 @@ func (h *HttpHandler) ResetPassword(c *gin.Context) {
 	c.JSON(http.StatusOK, res)
 }
 
+// GetMe retrieves details of the current authenticated user and disables browser caching.
 func (h *HttpHandler) GetMe(c *gin.Context) {
 	userID, _ := c.Get("userID")
 	role, _ := c.Get("role")
@@ -357,7 +382,7 @@ func (h *HttpHandler) GetMe(c *gin.Context) {
 		return
 	}
 
-	// Disable caching
+	// Disable caching for security.
 	c.Header("Cache-Control", "no-store, no-cache, must-revalidate, post-check=0, pre-check=0")
 	c.Header("Pragma", "no-cache")
 	c.Header("Expires", "0")
@@ -365,6 +390,7 @@ func (h *HttpHandler) GetMe(c *gin.Context) {
 	c.JSON(http.StatusOK, res)
 }
 
+// UpdateMe modifies the profile details of the authenticated user.
 func (h *HttpHandler) UpdateMe(c *gin.Context) {
 	userID, _ := c.Get("userID")
 
@@ -383,11 +409,13 @@ func (h *HttpHandler) UpdateMe(c *gin.Context) {
 	c.JSON(http.StatusOK, res)
 }
 
+// changePasswordReq holds parameters for password update checks.
 type changePasswordReq struct {
 	OldPassword string `json:"oldPassword" binding:"required"`
 	NewPassword string `json:"newPassword" binding:"required,min=6"`
 }
 
+// ChangePassword updates user passwords after verifying their current password.
 func (h *HttpHandler) ChangePassword(c *gin.Context) {
 	userID, _ := c.Get("userID")
 
@@ -406,6 +434,7 @@ func (h *HttpHandler) ChangePassword(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Password changed successfully."})
 }
 
+// FollowUser establishes follow connections between users.
 func (h *HttpHandler) FollowUser(c *gin.Context) {
 	followerID, _ := c.Get("userID")
 	followedIDStr := c.Param("id")
@@ -426,6 +455,7 @@ func (h *HttpHandler) FollowUser(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Successfully followed user."})
 }
 
+// UnfollowUser removes follow relationships.
 func (h *HttpHandler) UnfollowUser(c *gin.Context) {
 	followerID, _ := c.Get("userID")
 	followedIDStr := c.Param("id")
@@ -446,6 +476,7 @@ func (h *HttpHandler) UnfollowUser(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Successfully unfollowed user."})
 }
 
+// GetNotifications returns notifications for the authenticated user and calculates unread count.
 func (h *HttpHandler) GetNotifications(c *gin.Context) {
 	userID, _ := c.Get("userID")
 	roleVal, exists := c.Get("role")
@@ -473,6 +504,7 @@ func (h *HttpHandler) GetNotifications(c *gin.Context) {
 	})
 }
 
+// MarkNotificationsAsRead flags all notifications for the authenticated user as read.
 func (h *HttpHandler) MarkNotificationsAsRead(c *gin.Context) {
 	userID, _ := c.Get("userID")
 	roleVal, exists := c.Get("role")
@@ -490,6 +522,7 @@ func (h *HttpHandler) MarkNotificationsAsRead(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "All notifications marked as read."})
 }
 
+// SearchUsers performs user searches based on query string parameters.
 func (h *HttpHandler) SearchUsers(c *gin.Context) {
 	query := c.Query("q")
 	res, err := h.usecase.SearchUsers(c.Request.Context(), query)
@@ -500,10 +533,12 @@ func (h *HttpHandler) SearchUsers(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"users": res})
 }
 
+// toggleFollowReq holds JSON parameters to toggle follow status.
 type toggleFollowReq struct {
 	UserID int64 `json:"userId" binding:"required"`
 }
 
+// ToggleFollowUser alternates follow status between users.
 func (h *HttpHandler) ToggleFollowUser(c *gin.Context) {
 	followerID, _ := c.Get("userID")
 	var req toggleFollowReq
@@ -520,3 +555,4 @@ func (h *HttpHandler) ToggleFollowUser(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Successfully toggled follow state."})
 }
+

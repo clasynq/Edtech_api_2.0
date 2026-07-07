@@ -11,14 +11,17 @@ import (
 	"gorm.io/gorm"
 )
 
+// postgresAdminRepository implements domain.AdminRepository interface for GORM Postgres.
 type postgresAdminRepository struct {
 	db *gorm.DB
 }
 
+// NewPostgresAdminRepository initializes postgresAdminRepository.
 func NewPostgresAdminRepository(db *gorm.DB) domain.AdminRepository {
 	return &postgresAdminRepository{db: db}
 }
 
+// GetDashboardStats fetches (or builds) the admin overview stats record (ID: 1).
 func (r *postgresAdminRepository) GetDashboardStats(ctx context.Context) (*domain.AdminDashboard, error) {
 	var stats domain.AdminDashboard
 	if err := r.db.WithContext(ctx).FirstOrCreate(&stats, domain.AdminDashboard{ID: 1}).Error; err != nil {
@@ -27,6 +30,8 @@ func (r *postgresAdminRepository) GetDashboardStats(ctx context.Context) (*domai
 	return &stats, nil
 }
 
+// RefreshDashboardStats recalculates total student signups, teacher registries,
+// and active batch counts, saving them to the admin overview stats record.
 func (r *postgresAdminRepository) RefreshDashboardStats(ctx context.Context) (*domain.AdminDashboard, error) {
 	var stats domain.AdminDashboard
 	if err := r.db.WithContext(ctx).FirstOrCreate(&stats, domain.AdminDashboard{ID: 1}).Error; err != nil {
@@ -35,10 +40,16 @@ func (r *postgresAdminRepository) RefreshDashboardStats(ctx context.Context) (*d
 	var studentCount int64
 	var teacherCount int64
 	var activeBatches int64
+
+	// Count students with at least one course enrollment
 	r.db.WithContext(ctx).Model(&domain.Student{}).Where(
 		"id IN (SELECT student_id FROM enrollments)",
 	).Count(&studentCount)
+	
+	// Count total teacher profiles
 	r.db.WithContext(ctx).Model(&domain.Teacher{}).Count(&teacherCount)
+	
+	// Count non-completed course batches
 	r.db.WithContext(ctx).Model(&domain.Course{}).Where("course_status <> ?", "completed").Count(&activeBatches)
 
 	stats.TotalStudents = studentCount
@@ -50,6 +61,7 @@ func (r *postgresAdminRepository) RefreshDashboardStats(ctx context.Context) (*d
 	return &stats, nil
 }
 
+// GetAdminByID retrieves an administrative profile record using its numeric ID.
 func (r *postgresAdminRepository) GetAdminByID(ctx context.Context, id int64) (*domain.Admin, error) {
 	var admin domain.Admin
 	if err := r.db.WithContext(ctx).First(&admin, id).Error; err != nil {
@@ -61,6 +73,7 @@ func (r *postgresAdminRepository) GetAdminByID(ctx context.Context, id int64) (*
 	return &admin, nil
 }
 
+// GetAdminByEmail retrieves an admin record by email using a case-insensitive lookup.
 func (r *postgresAdminRepository) GetAdminByEmail(ctx context.Context, email string) (*domain.Admin, error) {
 	var admin domain.Admin
 	if err := r.db.WithContext(ctx).Where("LOWER(email) = ?", strings.ToLower(email)).First(&admin).Error; err != nil {
@@ -72,6 +85,7 @@ func (r *postgresAdminRepository) GetAdminByEmail(ctx context.Context, email str
 	return &admin, nil
 }
 
+// CreateNotification logs a system notification event for a specific recipient.
 func (r *postgresAdminRepository) CreateNotification(ctx context.Context, recipientID int64, recipientRole, notifType, message string) error {
 	notif := domain.UserNotification{
 		RecipientID:      recipientID,
@@ -84,6 +98,7 @@ func (r *postgresAdminRepository) CreateNotification(ctx context.Context, recipi
 	return r.db.WithContext(ctx).Create(&notif).Error
 }
 
+// GetActivities retrieves recent administrative audit logs, preloading admin emails in a batch query to prevent N+1 query loops.
 func (r *postgresAdminRepository) GetActivities(ctx context.Context, limit int) ([]domain.AdminActivity, error) {
 	var list []domain.AdminActivity
 	err := r.db.WithContext(ctx).
@@ -98,7 +113,7 @@ func (r *postgresAdminRepository) GetActivities(ctx context.Context, limit int) 
 		return list, nil
 	}
 
-	// Load emails dynamically in a single batch query (1 query instead of N queries)
+	// Fetch admin emails in a single query by mapping administrative IDs.
 	adminIDs := make([]int64, 0, len(list))
 	seenIDs := make(map[int64]bool)
 	for _, act := range list {
@@ -122,6 +137,7 @@ func (r *postgresAdminRepository) GetActivities(ctx context.Context, limit int) 
 	return list, nil
 }
 
+// LogActivity writes a new audit entry detailing an admin action.
 func (r *postgresAdminRepository) LogActivity(ctx context.Context, adminID int64, action, entityType, entityName string) error {
 	activity := domain.AdminActivity{
 		AdminID:    adminID,
@@ -133,6 +149,7 @@ func (r *postgresAdminRepository) LogActivity(ctx context.Context, adminID int64
 	return r.db.WithContext(ctx).Create(&activity).Error
 }
 
+// ListTeachers retrieves teacher records filtered by search queries and course category mappings.
 func (r *postgresAdminRepository) ListTeachers(ctx context.Context, query, category string) ([]domain.Teacher, error) {
 	var list []domain.Teacher
 	dbQuery := r.db.WithContext(ctx)
@@ -147,6 +164,7 @@ func (r *postgresAdminRepository) ListTeachers(ctx context.Context, query, categ
 	return list, err
 }
 
+// GetTeacherByID retrieves a teacher record using its numeric ID.
 func (r *postgresAdminRepository) GetTeacherByID(ctx context.Context, id int64) (*domain.Teacher, error) {
 	var teacher domain.Teacher
 	if err := r.db.WithContext(ctx).First(&teacher, id).Error; err != nil {
@@ -158,14 +176,18 @@ func (r *postgresAdminRepository) GetTeacherByID(ctx context.Context, id int64) 
 	return &teacher, nil
 }
 
+// CreateTeacher creates a new teacher profile in the database.
 func (r *postgresAdminRepository) CreateTeacher(ctx context.Context, teacher *domain.Teacher) error {
 	return r.db.WithContext(ctx).Create(teacher).Error
 }
 
+// UpdateTeacher updates an existing teacher profile in the database.
 func (r *postgresAdminRepository) UpdateTeacher(ctx context.Context, teacher *domain.Teacher) error {
 	return r.db.WithContext(ctx).Save(teacher).Error
 }
 
+// DeleteTeacher removes a teacher profile and cleans up associated assignments, schedules, and activities.
+// This is executed as an atomic database transaction to prevent dangling foreign key references.
 func (r *postgresAdminRepository) DeleteTeacher(ctx context.Context, id int64) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// 1. Set courses.teacher_id = NULL
@@ -197,6 +219,7 @@ func (r *postgresAdminRepository) DeleteTeacher(ctx context.Context, id int64) e
 	})
 }
 
+// ListStudents retrieves student records preloaded with user profiles, optionally filtering by course categories or search queries.
 func (r *postgresAdminRepository) ListStudents(ctx context.Context, query, category string) ([]domain.Student, error) {
 	var students []domain.Student
 	dbQuery := r.db.WithContext(ctx).Preload("User")
@@ -224,6 +247,8 @@ func (r *postgresAdminRepository) ListStudents(ctx context.Context, query, categ
 	return students, err
 }
 
+// GetStudentEnrollmentInfo aggregates course names, batch IDs, subjects list, and teacher names
+// for a slice of student IDs. It structures responses inside maps to prevent N+1 nested GORM loops.
 func (r *postgresAdminRepository) GetStudentEnrollmentInfo(ctx context.Context, studentIDs []int64) (map[int64][]string, map[int64][]string, map[int64][]string, map[int64][]string, error) {
 	if len(studentIDs) == 0 {
 		return make(map[int64][]string), make(map[int64][]string), make(map[int64][]string), make(map[int64][]string), nil
@@ -304,6 +329,7 @@ func (r *postgresAdminRepository) GetStudentEnrollmentInfo(ctx context.Context, 
 	return coursesMap, batchesMap, subjectsMap, teachersMap, nil
 }
 
+// GetCoursesSales retrieves aggregated revenue stats and purchase counts for courses in a date window.
 func (r *postgresAdminRepository) GetCoursesSales(ctx context.Context, category string, start, end time.Time) ([]domain.CourseSales, error) {
 	var list []domain.CourseSales
 	query := r.db.WithContext(ctx).Table("courses").
@@ -327,6 +353,7 @@ func (r *postgresAdminRepository) GetCoursesSales(ctx context.Context, category 
 	return list, nil
 }
 
+// GetNotesSales retrieves aggregated revenue metrics for public paid smart PDF study notes.
 func (r *postgresAdminRepository) GetNotesSales(ctx context.Context, category string, start, end time.Time) ([]domain.NoteSales, error) {
 	var list []domain.NoteSales
 	query := r.db.WithContext(ctx).Table("notes").
@@ -350,6 +377,7 @@ func (r *postgresAdminRepository) GetNotesSales(ctx context.Context, category st
 	return list, nil
 }
 
+// GetTestSeriesSales retrieves purchase counts and total revenue generated by paid test series.
 func (r *postgresAdminRepository) GetTestSeriesSales(ctx context.Context, category string, start, end time.Time) ([]domain.TestSeriesSales, error) {
 	var list []domain.TestSeriesSales
 	query := r.db.WithContext(ctx).Table("test_series").
@@ -373,12 +401,14 @@ func (r *postgresAdminRepository) GetTestSeriesSales(ctx context.Context, catego
 	return list, nil
 }
 
+// ListCategories returns a sorted list of registered categories.
 func (r *postgresAdminRepository) ListCategories(ctx context.Context) ([]domain.Category, error) {
 	var list []domain.Category
 	err := r.db.WithContext(ctx).Order("name").Find(&list).Error
 	return list, err
 }
 
+// GetCategoryByID retrieves a category record by ID.
 func (r *postgresAdminRepository) GetCategoryByID(ctx context.Context, id int64) (*domain.Category, error) {
 	var cat domain.Category
 	if err := r.db.WithContext(ctx).First(&cat, id).Error; err != nil {
@@ -390,6 +420,7 @@ func (r *postgresAdminRepository) GetCategoryByID(ctx context.Context, id int64)
 	return &cat, nil
 }
 
+// GetCategoryByName retrieves a category record by its exact string name.
 func (r *postgresAdminRepository) GetCategoryByName(ctx context.Context, name string) (*domain.Category, error) {
 	var cat domain.Category
 	if err := r.db.WithContext(ctx).Where("LOWER(name) = ?", strings.ToLower(name)).First(&cat).Error; err != nil {
@@ -401,18 +432,22 @@ func (r *postgresAdminRepository) GetCategoryByName(ctx context.Context, name st
 	return &cat, nil
 }
 
+// CreateCategory adds a category record.
 func (r *postgresAdminRepository) CreateCategory(ctx context.Context, category *domain.Category) error {
 	return r.db.WithContext(ctx).Create(category).Error
 }
 
+// UpdateCategory updates category settings.
 func (r *postgresAdminRepository) UpdateCategory(ctx context.Context, category *domain.Category) error {
 	return r.db.WithContext(ctx).Save(category).Error
 }
 
+// DeleteCategory deletes a category record.
 func (r *postgresAdminRepository) DeleteCategory(ctx context.Context, id int64) error {
 	return r.db.WithContext(ctx).Delete(&domain.Category{}, id).Error
 }
 
+// CascadeCategoryUpdate cascades category field updates across related courses, notes, test series, and teachers in a transaction.
 func (r *postgresAdminRepository) CascadeCategoryUpdate(ctx context.Context, oldName, newName string) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		tx.Table("courses").Where("LOWER(category) = ?", strings.ToLower(oldName)).Update("category", newName)
@@ -423,6 +458,7 @@ func (r *postgresAdminRepository) CascadeCategoryUpdate(ctx context.Context, old
 	})
 }
 
+// CascadeCategoryDelete sets category fields to blank across related tables on category deletion.
 func (r *postgresAdminRepository) CascadeCategoryDelete(ctx context.Context, name string) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		tx.Table("courses").Where("LOWER(category) = ?", strings.ToLower(name)).Update("category", "")
@@ -433,6 +469,7 @@ func (r *postgresAdminRepository) CascadeCategoryDelete(ctx context.Context, nam
 	})
 }
 
+// AssignTeacherToCourses establishes joint course assignments in the courses_teachers join table.
 func (r *postgresAdminRepository) AssignTeacherToCourses(ctx context.Context, teacherID int64, courseNames []string) error {
 	if len(courseNames) == 0 {
 		return nil
@@ -446,7 +483,7 @@ func (r *postgresAdminRepository) AssignTeacherToCourses(ctx context.Context, te
 		return err
 	}
 	for _, c := range courses {
-		// Append to join table
+		// Append to join table.
 		var link struct {
 			CourseID  int64 `gorm:"column:course_id"`
 			TeacherID int64 `gorm:"column:teacher_id"`
@@ -455,7 +492,7 @@ func (r *postgresAdminRepository) AssignTeacherToCourses(ctx context.Context, te
 		link.TeacherID = teacherID
 		r.db.WithContext(ctx).Table("courses_teachers").FirstOrCreate(&link, link)
 
-		// Set primary teacher if empty
+		// Set primary teacher if empty.
 		if c.TeacherID == nil {
 			tid := teacherID
 			r.db.WithContext(ctx).Model(&c).Update("teacher_id", tid)
@@ -464,6 +501,7 @@ func (r *postgresAdminRepository) AssignTeacherToCourses(ctx context.Context, te
 	return nil
 }
 
+// UnassignTeacherFromOldCourses removes teacher course assignments that are no longer part of their courseNames list.
 func (r *postgresAdminRepository) UnassignTeacherFromOldCourses(ctx context.Context, teacherID int64, courseNames []string) error {
 	var links []struct {
 		CourseID int64 `gorm:"column:course_id"`
@@ -483,10 +521,10 @@ func (r *postgresAdminRepository) UnassignTeacherFromOldCourses(ctx context.Cont
 				}
 			}
 			if !inNewList {
-				// Delete from join table using raw SQL for 100% reliability
+				// Delete from join table using raw SQL for 100% reliability.
 				r.db.WithContext(ctx).Exec("DELETE FROM courses_teachers WHERE course_id = ? AND teacher_id = ?", course.ID, teacherID)
 
-				// Update course.teacher_id if it matched
+				// Update course.teacher_id if it matched.
 				if course.TeacherID != nil && *course.TeacherID == teacherID {
 					var fallback struct {
 						TeacherID int64 `gorm:"column:teacher_id"`
@@ -506,6 +544,7 @@ func (r *postgresAdminRepository) UnassignTeacherFromOldCourses(ctx context.Cont
 	return nil
 }
 
+// GetCourseByName retrieves a course record by name using a case-insensitive check.
 func (r *postgresAdminRepository) GetCourseByName(ctx context.Context, name string) (*domain.Course, error) {
 	var c domain.Course
 	if err := r.db.WithContext(ctx).Where("LOWER(course_name) = ?", strings.ToLower(name)).First(&c).Error; err != nil {
@@ -517,6 +556,7 @@ func (r *postgresAdminRepository) GetCourseByName(ctx context.Context, name stri
 	return &c, nil
 }
 
+// GetCourseByBatchID retrieves a course record by its unique batch ID.
 func (r *postgresAdminRepository) GetCourseByBatchID(ctx context.Context, batchID string) (*domain.Course, error) {
 	var c domain.Course
 	if err := r.db.WithContext(ctx).Where("LOWER(batch_id) = ?", strings.ToLower(batchID)).First(&c).Error; err != nil {
@@ -528,6 +568,7 @@ func (r *postgresAdminRepository) GetCourseByBatchID(ctx context.Context, batchI
 	return &c, nil
 }
 
+// DeleteClassSchedulesBySignature removes specific lecture schedules matching teacher, batch, topic, date and start time.
 func (r *postgresAdminRepository) DeleteClassSchedulesBySignature(ctx context.Context, teacherID int64, batchID, topic string, date time.Time, startTime string) error {
 	// Parse start time to fit DB formats (either HH:MM or HH:MM:SS)
 	formattedTime := startTime
@@ -540,6 +581,7 @@ func (r *postgresAdminRepository) DeleteClassSchedulesBySignature(ctx context.Co
 		Delete(&domain.ClassSchedule{}).Error
 }
 
+// UpsertClassSchedule creates or updates a lecture schedule based on teacher, course, date and time parameters.
 func (r *postgresAdminRepository) UpsertClassSchedule(ctx context.Context, schedule *domain.ClassSchedule, topic string, subjectObj *domain.Subject) error {
 	var existing domain.ClassSchedule
 	err := r.db.WithContext(ctx).
@@ -547,7 +589,7 @@ func (r *postgresAdminRepository) UpsertClassSchedule(ctx context.Context, sched
 			schedule.TeacherID, schedule.CourseID, schedule.ClassDate, schedule.StartTime).
 		First(&existing).Error
 	if err == nil {
-		// Update
+		// Update existing record details.
 		existing.TopicName = topic
 		existing.BatchID = schedule.BatchID
 		if subjectObj != nil {
@@ -555,7 +597,7 @@ func (r *postgresAdminRepository) UpsertClassSchedule(ctx context.Context, sched
 		}
 		return r.db.WithContext(ctx).Save(&existing).Error
 	} else if errors.Is(err, gorm.ErrRecordNotFound) {
-		// Create
+		// Create new schedule record.
 		if subjectObj != nil {
 			schedule.SubjectID = &subjectObj.ID
 		}
@@ -564,6 +606,7 @@ func (r *postgresAdminRepository) UpsertClassSchedule(ctx context.Context, sched
 	return err
 }
 
+// GetSiteStatus retrieves (or builds) the site status overview metrics record (ID: 1).
 func (r *postgresAdminRepository) GetSiteStatus(ctx context.Context) (*domain.SiteStatus, error) {
 	var status domain.SiteStatus
 	if err := r.db.WithContext(ctx).FirstOrCreate(&status, domain.SiteStatus{ID: 1}).Error; err != nil {
@@ -572,18 +615,21 @@ func (r *postgresAdminRepository) GetSiteStatus(ctx context.Context) (*domain.Si
 	return &status, nil
 }
 
+// UpdateSiteStatus updates site landing stats counters in the database.
 func (r *postgresAdminRepository) UpdateSiteStatus(ctx context.Context, stats *domain.SiteStatus) error {
 	stats.ID = 1
 	stats.UpdatedAt = time.Now()
 	return r.db.WithContext(ctx).Save(stats).Error
 }
 
+// GetTotalUsersCount counts total verified user accounts.
 func (r *postgresAdminRepository) GetTotalUsersCount(ctx context.Context) (int64, error) {
 	var count int64
 	err := r.db.WithContext(ctx).Model(&domain.User{}).Count(&count).Error
 	return count, err
 }
 
+// GetWeeklyLiveClassesCount counts non-cancelled class schedules inside a date window.
 func (r *postgresAdminRepository) GetWeeklyLiveClassesCount(ctx context.Context, start, end time.Time) (int64, error) {
 	var count int64
 	err := r.db.WithContext(ctx).Model(&domain.ClassSchedule{}).
@@ -592,6 +638,7 @@ func (r *postgresAdminRepository) GetWeeklyLiveClassesCount(ctx context.Context,
 	return count, err
 }
 
+// GetActiveBatchesCount counts current non-completed courses.
 func (r *postgresAdminRepository) GetActiveBatchesCount(ctx context.Context) (int64, error) {
 	var count int64
 	err := r.db.WithContext(ctx).Model(&domain.Course{}).
@@ -600,12 +647,14 @@ func (r *postgresAdminRepository) GetActiveBatchesCount(ctx context.Context) (in
 	return count, err
 }
 
+// GetTotalNotesCount counts total notes uploaded to the platform.
 func (r *postgresAdminRepository) GetTotalNotesCount(ctx context.Context) (int64, error) {
 	var count int64
 	err := r.db.WithContext(ctx).Model(&domain.Note{}).Count(&count).Error
 	return count, err
 }
 
+// GetRecordingsCount counts completed class schedules that have playback URLs saved.
 func (r *postgresAdminRepository) GetRecordingsCount(ctx context.Context) (int64, error) {
 	var count int64
 	err := r.db.WithContext(ctx).Model(&domain.ClassSchedule{}).
@@ -614,18 +663,21 @@ func (r *postgresAdminRepository) GetRecordingsCount(ctx context.Context) (int64
 	return count, err
 }
 
+// ListActiveJobPositions retrieves job openings flagged as active.
 func (r *postgresAdminRepository) ListActiveJobPositions(ctx context.Context) ([]domain.JobPosition, error) {
 	var list []domain.JobPosition
 	err := r.db.WithContext(ctx).Where("is_active = ?", true).Order("created_at desc").Find(&list).Error
 	return list, err
 }
 
+// ListJobPositions returns all job openings sorted by creation date.
 func (r *postgresAdminRepository) ListJobPositions(ctx context.Context) ([]domain.JobPosition, error) {
 	var list []domain.JobPosition
 	err := r.db.WithContext(ctx).Order("created_at desc").Find(&list).Error
 	return list, err
 }
 
+// GetJobPositionByID retrieves a job opening by its ID.
 func (r *postgresAdminRepository) GetJobPositionByID(ctx context.Context, id int64) (*domain.JobPosition, error) {
 	var jp domain.JobPosition
 	err := r.db.WithContext(ctx).First(&jp, id).Error
@@ -635,10 +687,12 @@ func (r *postgresAdminRepository) GetJobPositionByID(ctx context.Context, id int
 	return &jp, nil
 }
 
+// CreateJobPosition adds a job opening position in the database.
 func (r *postgresAdminRepository) CreateJobPosition(ctx context.Context, jp *domain.JobPosition) error {
 	return r.db.WithContext(ctx).Create(jp).Error
 }
 
+// UpdateJobPosition updates specific attributes on a job opening position in the database.
 func (r *postgresAdminRepository) UpdateJobPosition(ctx context.Context, id int64, updates map[string]interface{}) (*domain.JobPosition, error) {
 	var jp domain.JobPosition
 	if err := r.db.WithContext(ctx).First(&jp, id).Error; err != nil {
@@ -650,16 +704,19 @@ func (r *postgresAdminRepository) UpdateJobPosition(ctx context.Context, id int6
 	return &jp, nil
 }
 
+// DeleteJobPosition deletes a job opening position record.
 func (r *postgresAdminRepository) DeleteJobPosition(ctx context.Context, id int64) error {
 	return r.db.WithContext(ctx).Delete(&domain.JobPosition{}, id).Error
 }
 
+// ListJobApplications returns all submitted candidate job applications.
 func (r *postgresAdminRepository) ListJobApplications(ctx context.Context) ([]domain.JobApplication, error) {
 	var list []domain.JobApplication
 	err := r.db.WithContext(ctx).Order("created_at desc").Find(&list).Error
 	return list, err
 }
 
+// GetJobApplicationByID retrieves a candidate job application by ID.
 func (r *postgresAdminRepository) GetJobApplicationByID(ctx context.Context, id int64) (*domain.JobApplication, error) {
 	var app domain.JobApplication
 	err := r.db.WithContext(ctx).First(&app, id).Error
@@ -669,10 +726,13 @@ func (r *postgresAdminRepository) GetJobApplicationByID(ctx context.Context, id 
 	return &app, nil
 }
 
+// CreateJobApplication inserts a new candidate job application record.
 func (r *postgresAdminRepository) CreateJobApplication(ctx context.Context, app *domain.JobApplication) error {
 	return r.db.WithContext(ctx).Create(app).Error
 }
 
+// UpdateJobApplication updates a candidate job application record.
 func (r *postgresAdminRepository) UpdateJobApplication(ctx context.Context, app *domain.JobApplication) error {
 	return r.db.WithContext(ctx).Save(app).Error
 }
+

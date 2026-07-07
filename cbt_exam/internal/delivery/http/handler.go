@@ -10,14 +10,19 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// httpHandler handles HTTP requests for CBT (Computer Based Test) Exams.
 type httpHandler struct {
 	uc domain.CbtExamUsecase
 }
 
+// NewHttpHandler initializes the CBT httpHandler.
 func NewHttpHandler(uc domain.CbtExamUsecase) *httpHandler {
 	return &httpHandler{uc: uc}
 }
 
+// RegisterRoutes registers routes to the Gin engine.
+// Maps endpoints for beginning attempts, saving questions, submitting results,
+// querying leaderboards, and legacy monolith compatibilities.
 func RegisterRoutes(
 	r *gin.Engine,
 	uc domain.CbtExamUsecase,
@@ -36,13 +41,14 @@ func RegisterRoutes(
 		auth.GET("/attempts/:slug/result", handler.GetAttemptResult)
 	}
 
-	// Legacy frontend compatibility routes
+	// Legacy frontend compatibility routes supporting older request payloads
 	r.POST("/api/test-attempts/start/", authMiddleware, handler.StartAttemptLegacy)
 	r.POST("/api/test-attempts/submit/", authMiddleware, handler.SubmitTestLegacy)
 	r.GET("/api/results/:id/", authMiddleware, handler.GetAttemptResultLegacy)
 	r.GET("/api/tests/:id/attempts_monitoring/", authMiddleware, handler.GetAttemptsMonitoring)
 }
 
+// StartAttempt starts or resumes a test attempt for a student.
 func (h *httpHandler) StartAttempt(c *gin.Context) {
 	testIDOrSlug := c.Param("id")
 
@@ -65,6 +71,7 @@ func (h *httpHandler) StartAttempt(c *gin.Context) {
 	})
 }
 
+// SubmitAnswer saves a single question answer choice.
 func (h *httpHandler) SubmitAnswer(c *gin.Context) {
 	attemptSlug := c.Param("slug")
 
@@ -94,6 +101,7 @@ func (h *httpHandler) SubmitAnswer(c *gin.Context) {
 	c.JSON(http.StatusOK, ans)
 }
 
+// SubmitTest completes and scores the overall assessment attempt.
 func (h *httpHandler) SubmitTest(c *gin.Context) {
 	attemptSlug := c.Param("slug")
 
@@ -113,6 +121,7 @@ func (h *httpHandler) SubmitTest(c *gin.Context) {
 	c.JSON(http.StatusOK, res)
 }
 
+// GetAttemptResult returns calculation details for a completed attempt.
 func (h *httpHandler) GetAttemptResult(c *gin.Context) {
 	attemptSlug := c.Param("slug")
 
@@ -132,6 +141,7 @@ func (h *httpHandler) GetAttemptResult(c *gin.Context) {
 	c.JSON(http.StatusOK, res)
 }
 
+// GetLeaderboard displays top-scoring users for a test.
 func (h *httpHandler) GetLeaderboard(c *gin.Context) {
 	testIDOrSlug := c.Param("id")
 
@@ -144,6 +154,7 @@ func (h *httpHandler) GetLeaderboard(c *gin.Context) {
 	c.JSON(http.StatusOK, leaderboard)
 }
 
+// StartAttemptLegacy processes legacy JSON formats (parsing test_id as float64 or string).
 func (h *httpHandler) StartAttemptLegacy(c *gin.Context) {
 	var req struct {
 		TestID interface{} `json:"test_id"`
@@ -177,7 +188,7 @@ func (h *httpHandler) StartAttemptLegacy(c *gin.Context) {
 		return
 	}
 
-	// Fetch test to calculate remaining seconds
+	// Calculate remaining exam seconds
 	test, err := h.uc.GetTestByIDOrSlug(c.Request.Context(), testIDStr)
 	remainingSeconds := 0
 	if err == nil && test != nil {
@@ -206,6 +217,7 @@ type legacySubmitReq struct {
 	Answers   []legacyAnswer `json:"answers"`
 }
 
+// SubmitTestLegacy handles bulk answer submissions and finalizes attempts.
 func (h *httpHandler) SubmitTestLegacy(c *gin.Context) {
 	var req legacySubmitReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -231,7 +243,7 @@ func (h *httpHandler) SubmitTestLegacy(c *gin.Context) {
 		return
 	}
 
-	// Submit answers sequentially
+	// Submit all answers sequentially
 	for _, ans := range req.Answers {
 		if ans.SelectedAnswer != "" {
 			_, _ = h.uc.SubmitAnswer(c.Request.Context(), userID, attemptIDStr, ans.QuestionID, ans.SelectedAnswer)
@@ -248,6 +260,7 @@ func (h *httpHandler) SubmitTestLegacy(c *gin.Context) {
 	c.JSON(http.StatusOK, res)
 }
 
+// GetAttemptResultLegacy retrieves attempt details using legacy URL params.
 func (h *httpHandler) GetAttemptResultLegacy(c *gin.Context) {
 	attemptIDOrSlug := c.Param("id")
 
@@ -267,6 +280,7 @@ func (h *httpHandler) GetAttemptResultLegacy(c *gin.Context) {
 	c.JSON(http.StatusOK, res)
 }
 
+// GetAttemptsMonitoring fetches progress logs for monitoring.
 func (h *httpHandler) GetAttemptsMonitoring(c *gin.Context) {
 	testIDStr := c.Param("id")
 
@@ -285,3 +299,4 @@ func (h *httpHandler) GetAttemptsMonitoring(c *gin.Context) {
 
 	c.JSON(http.StatusOK, res)
 }
+

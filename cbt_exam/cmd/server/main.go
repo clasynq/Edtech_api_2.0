@@ -20,11 +20,15 @@ import (
 	"gorm.io/gorm/logger"
 )
 
+// main is the server entrypoint for the CBT (Computer Based Test) Exam microservice.
+// It initializes DB connections, config, dependency injection layers,
+// parses and enforces SSL options, and runs the server.
 func main() {
+	// 1. Load dotenv variables
 	_ = godotenv.Load(".env")
 	_ = godotenv.Load()
 
-	// 2. Load config
+	// 2. Load configuration details
 	cfg := config.LoadConfig()
 	if cfg.Port == "" {
 		cfg.Port = "8087" // default port for cbt_exam service
@@ -40,7 +44,7 @@ func main() {
 		}
 	}
 
-	// 3. Connect to Postgres GORM
+	// 3. Connect to primary PostgreSQL instance
 	log.Printf("Connecting to Postgres at: %s", dbURL)
 	dbLogger := logger.New(
 		log.New(os.Stdout, "\r\n", log.LstdFlags),
@@ -54,7 +58,6 @@ func main() {
 	db, err := gorm.Open(postgres.Open(dbURL), &gorm.Config{
 		Logger: dbLogger,
 	})
-
 	if err != nil {
 		log.Fatalf("failed to connect to database: %v", err)
 	}
@@ -71,7 +74,7 @@ func main() {
 		}
 	}
 
-	// 5. Initialize Layers
+	// 5. Initialize Clean Architecture dependency injection layers
 	repo := repository.NewPostgresCbtExamRepository(db)
 	uc := usecase.NewCbtExamUsecase(repo, rdb)
 	authMiddleware := delivery.AuthMiddleware(cfg.SecretKey, rdb)
@@ -92,3 +95,4 @@ func main() {
 		log.Fatalf("failed to start server: %v", err)
 	}
 }
+

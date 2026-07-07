@@ -6,15 +6,18 @@ import (
 	"github.com/joho/godotenv"
 )
 
+// Config represents environmental settings required for running the Blog service.
 type Config struct {
-	Port        string
-	DatabaseURL string
-	RedisURL    string
-	SecretKey   string
-	BaseURL     string
-	MediaRoot   string
+	Port        string // Port to bind the server to (e.g. 8086).
+	DatabaseURL string // Connection URL for PostgreSQL.
+	RedisURL    string // Redis server connection string.
+	SecretKey   string // Signing secret key for JWT verification.
+	BaseURL     string // Base domain/URL of the running application.
+	MediaRoot   string // Path to the local directory where uploaded files are saved.
 }
 
+// LoadConfig loads parameters from .env files and active environment parameters,
+// mapping them to the Config struct.
 func LoadConfig() *Config {
 	_ = godotenv.Load(".env")
 	_ = godotenv.Load()
@@ -38,3 +41,4 @@ func LoadConfig() *Config {
 		MediaRoot:   mediaRoot,
 	}
 }
+

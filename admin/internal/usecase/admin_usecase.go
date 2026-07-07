@@ -15,6 +15,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// adminUsecase coordinates domain administrative business logic orchestrations.
 type adminUsecase struct {
 	repo             domain.AdminRepository
 	rdb              *redis.Client
@@ -25,6 +26,7 @@ type adminUsecase struct {
 	defaultFromEmail string
 }
 
+// NewAdminUsecase initializes the adminUsecase business layer object.
 func NewAdminUsecase(repo domain.AdminRepository, rdb *redis.Client, smtpHost, smtpPort, smtpUser, smtpPass, defaultFromEmail string) domain.AdminUsecase {
 	return &adminUsecase{
 		repo:             repo,
@@ -37,6 +39,7 @@ func NewAdminUsecase(repo domain.AdminRepository, rdb *redis.Client, smtpHost, s
 	}
 }
 
+// GetOverview builds administrative dashboard overview statistics (like user totals, teacher totals, active batches).
 func (u *adminUsecase) GetOverview(ctx context.Context) (map[string]interface{}, error) {
 	stats, err := u.repo.RefreshDashboardStats(ctx)
 	if err != nil {
@@ -47,7 +50,7 @@ func (u *adminUsecase) GetOverview(ctx context.Context) (map[string]interface{},
 			"totalStudents":   stats.TotalStudents,
 			"totalTeachers":   stats.TotalTeacher,
 			"activeBatches":   stats.ActiveBatches,
-			"monthlyRevenue":  135000, // Matching Django mock
+			"monthlyRevenue":  135000, // Mocked to align with Django monolith overview
 		},
 		"deltas": map[string]interface{}{
 			"totalStudents":   "+0",
@@ -58,6 +61,7 @@ func (u *adminUsecase) GetOverview(ctx context.Context) (map[string]interface{},
 	}, nil
 }
 
+// GetActivities returns the last 30 administrative activities logged in the audit trail.
 func (u *adminUsecase) GetActivities(ctx context.Context) ([]map[string]interface{}, error) {
 	list, err := u.repo.GetActivities(ctx, 30)
 	if err != nil {
@@ -77,6 +81,7 @@ func (u *adminUsecase) GetActivities(ctx context.Context) ([]map[string]interfac
 	return res, nil
 }
 
+// ListTeachers compiles a list of teachers, deserializing assigned courses and task lists from JSON text.
 func (u *adminUsecase) ListTeachers(ctx context.Context, query, category string) (map[string]interface{}, error) {
 	list, err := u.repo.ListTeachers(ctx, query, category)
 	if err != nil {
@@ -129,6 +134,7 @@ func (u *adminUsecase) ListTeachers(ctx context.Context, query, category string)
 	}, nil
 }
 
+// CreateTeacher registers a teacher profile, encoding the initial password in standard Django PBKDF2 structure.
 func (u *adminUsecase) CreateTeacher(ctx context.Context, teacher *domain.Teacher) (map[string]interface{}, error) {
 	salt := utils.GenerateSalt(12)
 	teacher.Password = utils.EncodeDjangoPassword(teacher.Password, salt, 390000)
@@ -146,7 +152,7 @@ func (u *adminUsecase) CreateTeacher(ctx context.Context, teacher *domain.Teache
 		return nil, err
 	}
 
-	// Refresh stats
+	// Update overview stats
 	_, _ = u.repo.RefreshDashboardStats(ctx)
 
 	var coursesList []string
@@ -154,7 +160,7 @@ func (u *adminUsecase) CreateTeacher(ctx context.Context, teacher *domain.Teache
 	var tasksList []map[string]interface{}
 	_ = json.Unmarshal([]byte(teacher.Tasks), &tasksList)
 
-	// Trigger notifications
+	// Create alerts/notifications
 	_ = u.repo.CreateNotification(ctx, teacher.ID, "teacher", "account_created", "Your teacher account has been successfully created by the Admin.")
 
 	if len(coursesList) > 0 {
@@ -180,6 +186,7 @@ func (u *adminUsecase) CreateTeacher(ctx context.Context, teacher *domain.Teache
 	}, nil
 }
 
+// UpdateTeacher updates teacher fields. If the tasks or assigned courses change, it syncs database schedules.
 func (u *adminUsecase) UpdateTeacher(ctx context.Context, teacherID int64, updates map[string]interface{}) (map[string]interface{}, error) {
 	teacher, err := u.repo.GetTeacherByID(ctx, teacherID)
 	if err != nil {
@@ -219,7 +226,7 @@ func (u *adminUsecase) UpdateTeacher(ctx context.Context, teacherID int64, updat
 		teacher.PhotoURL = photoURL
 	}
 
-	// Backup old tasks
+	// Backup old tasks list to determine schedule diffs
 	var oldTasks []map[string]interface{}
 	_ = json.Unmarshal([]byte(teacher.Tasks), &oldTasks)
 
@@ -229,7 +236,7 @@ func (u *adminUsecase) UpdateTeacher(ctx context.Context, teacherID int64, updat
 		if err == nil {
 			teacher.Tasks = string(raw)
 			
-			// Sync class schedules
+			// Synchronize calendar schedule records
 			u.syncTeacherTasksSchedules(ctx, teacher, oldTasks, newTasks)
 			tasksUpdated = true
 		}
@@ -243,7 +250,7 @@ func (u *adminUsecase) UpdateTeacher(ctx context.Context, teacherID int64, updat
 			var coursesList []string
 			_ = json.Unmarshal(raw, &coursesList)
 			
-			// Update database relationships
+			// Adjust teacher mappings in courses
 			_ = u.repo.UnassignTeacherFromOldCourses(ctx, teacher.ID, coursesList)
 			_ = u.repo.AssignTeacherToCourses(ctx, teacher.ID, coursesList)
 			coursesUpdated = true
@@ -259,7 +266,7 @@ func (u *adminUsecase) UpdateTeacher(ctx context.Context, teacherID int64, updat
 
 	_, _ = u.repo.RefreshDashboardStats(ctx)
 
-	// Trigger notifications for updates
+	// Create alerts/notifications
 	if tasksUpdated {
 		var tasksList []map[string]interface{}
 		_ = json.Unmarshal([]byte(teacher.Tasks), &tasksList)
@@ -300,15 +307,16 @@ func (u *adminUsecase) UpdateTeacher(ctx context.Context, teacherID int64, updat
 	}, nil
 }
 
+// syncTeacherTasksSchedules parses task changes, matching old task schedules with new ones to delete or add database schedules.
 func (u *adminUsecase) syncTeacherTasksSchedules(ctx context.Context, teacher *domain.Teacher, oldTasks []map[string]interface{}, newTasks interface{}) {
-	// Parse new tasks as slice
+	// Parse new tasks slice
 	var newTasksSlice []map[string]interface{}
 	raw, err := json.Marshal(newTasks)
 	if err == nil {
 		_ = json.Unmarshal(raw, &newTasksSlice)
 	}
 
-	// 1. Build signatures of old schedules
+	// 1. Build signatures of old schedules: "batch|task|date|time"
 	oldSignatures := make(map[string]bool)
 	for _, t := range oldTasks {
 		batch := getStringField(t, "batch")
@@ -418,13 +426,14 @@ func (u *adminUsecase) syncTeacherTasksSchedules(ctx context.Context, teacher *d
 				}
 
 				var subjectObj *domain.Subject
-				// Just pass subject object search parameters to repository
+				// Update database
 				_ = u.repo.UpsertClassSchedule(ctx, schedule, topic, subjectObj)
 			}
 		}
 	}
 }
 
+// DeleteTeacher removes a teacher profile. If complete is false, it unassigns them from a single course.
 func (u *adminUsecase) DeleteTeacher(ctx context.Context, teacherID int64, complete bool, courseName string, adminID int64) error {
 	teacher, err := u.repo.GetTeacherByID(ctx, teacherID)
 	if err != nil {
@@ -440,7 +449,7 @@ func (u *adminUsecase) DeleteTeacher(ctx context.Context, teacherID int64, compl
 		}
 		_ = u.repo.LogActivity(ctx, adminID, "Deleted", "Teacher", teacher.Name)
 	} else {
-		// Unassign from courses
+		// Unassign from a specific course name
 		var coursesToKeep []string
 		var oldCourses []string
 		_ = json.Unmarshal([]byte(teacher.AssignedCourses), &oldCourses)
@@ -466,6 +475,7 @@ func (u *adminUsecase) DeleteTeacher(ctx context.Context, teacherID int64, compl
 	return nil
 }
 
+// ListStudents retrieves student signups, parsing user and course details inside a formatted payload.
 func (u *adminUsecase) ListStudents(ctx context.Context, query, category string) ([]map[string]interface{}, error) {
 	list, err := u.repo.ListStudents(ctx, query, category)
 	if err != nil {
@@ -485,7 +495,6 @@ func (u *adminUsecase) ListStudents(ctx context.Context, query, category string)
 	// Fetch courses, batches, subjects, & teachers info in a single batch query
 	coursesMap, batchesMap, subjectsMap, teachersMap, err := u.repo.GetStudentEnrollmentInfo(ctx, studentIDs)
 	if err != nil {
-		// Log/fail-safe
 		coursesMap = make(map[int64][]string)
 		batchesMap = make(map[int64][]string)
 		subjectsMap = make(map[int64][]string)
@@ -516,9 +525,9 @@ func (u *adminUsecase) ListStudents(ctx context.Context, query, category string)
 			"email":            s.User.Email,
 			"username":         s.User.Username,
 			"fullName":         s.User.FullName,
-			"name":             s.User.FullName,      // Frontend expects student.name
+			"name":             s.User.FullName,      // Frontend maps student.name
 			"contactNumber":    s.User.ContactNumber,
-			"phoneNumber":      s.User.ContactNumber, // Frontend expects student.phoneNumber
+			"phoneNumber":      s.User.ContactNumber, // Frontend maps student.phoneNumber
 			"avatarUrl":        s.User.AvatarURL,
 			"createdAt":        s.CreatedAt.Format(time.RFC3339),
 			"purchasedCourses": courses,
@@ -530,6 +539,8 @@ func (u *adminUsecase) ListStudents(ctx context.Context, query, category string)
 	return res, nil
 }
 
+// GetSalesAnalysis compiles aggregated monthly sales breakdown on courses, notes, and test series.
+// Caches results in Redis for 10 minutes to protect database performance.
 func (u *adminUsecase) GetSalesAnalysis(ctx context.Context, monthStr, category string) (map[string]interface{}, error) {
 	var year, month int
 	now := time.Now()
@@ -561,7 +572,7 @@ func (u *adminUsecase) GetSalesAnalysis(ctx context.Context, monthStr, category 
 		}
 	}
 
-	// Calendar weeks
+	// Calculate calendar weeks
 	startOfMonth := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
 	endOfMonth := startOfMonth.AddDate(0, 1, -1)
 	numDays := endOfMonth.Day()
@@ -588,7 +599,7 @@ func (u *adminUsecase) GetSalesAnalysis(ctx context.Context, monthStr, category 
 		}
 	}
 
-	// 1. Course Sales
+	// 1. Course Sales Aggregations
 	coursesList, err := u.repo.GetCoursesSales(ctx, category, startOfMonth, endOfMonth)
 	if err != nil {
 		return nil, err
@@ -620,7 +631,7 @@ func (u *adminUsecase) GetSalesAnalysis(ctx context.Context, monthStr, category 
 		coursesRevenue += c.Revenue
 
 		coursesData[i] = map[string]interface{}{
-			"id":                      c.ID,
+			"id":                     c.ID,
 			"courseName":              c.CourseName,
 			"batchId":                 c.BatchID,
 			"price":                   c.Price,
@@ -630,7 +641,7 @@ func (u *adminUsecase) GetSalesAnalysis(ctx context.Context, monthStr, category 
 		}
 	}
 
-	// 2. Note Sales
+	// 2. Note Sales Aggregations
 	notesList, err := u.repo.GetNotesSales(ctx, category, startOfMonth, endOfMonth)
 	if err != nil {
 		return nil, err
@@ -671,7 +682,7 @@ func (u *adminUsecase) GetSalesAnalysis(ctx context.Context, monthStr, category 
 		}
 	}
 
-	// 3. Test Series Sales
+	// 3. Test Series Sales Aggregations
 	tsList, err := u.repo.GetTestSeriesSales(ctx, category, startOfMonth, endOfMonth)
 	if err != nil {
 		return nil, err
@@ -735,14 +746,17 @@ func (u *adminUsecase) GetSalesAnalysis(ctx context.Context, monthStr, category 
 	return responsePayload, nil
 }
 
+// ListCategories returns registered course categories.
 func (u *adminUsecase) ListCategories(ctx context.Context) ([]domain.Category, error) {
 	return u.repo.ListCategories(ctx)
 }
 
+// GetCategory retrieves a category record by ID.
 func (u *adminUsecase) GetCategory(ctx context.Context, id int64) (*domain.Category, error) {
 	return u.repo.GetCategoryByID(ctx, id)
 }
 
+// CreateCategory adds a category record and invalidates stats cache keys.
 func (u *adminUsecase) CreateCategory(ctx context.Context, name string) (*domain.Category, error) {
 	category := &domain.Category{
 		Name:      name,
@@ -751,11 +765,11 @@ func (u *adminUsecase) CreateCategory(ctx context.Context, name string) (*domain
 	if err := u.repo.CreateCategory(ctx, category); err != nil {
 		return nil, err
 	}
-	// Invalidate cache
 	u.rdb.Del(ctx, "homepage_platform_stats", "platform_categories")
 	return category, nil
 }
 
+// UpdateCategory modifies category name and cascades updates across courses, notes, test series, and teachers.
 func (u *adminUsecase) UpdateCategory(ctx context.Context, id int64, name string) (*domain.Category, error) {
 	category, err := u.repo.GetCategoryByID(ctx, id)
 	if err != nil {
@@ -772,14 +786,13 @@ func (u *adminUsecase) UpdateCategory(ctx context.Context, id int64, name string
 		return nil, err
 	}
 
-	// Cascade changes
 	_ = u.repo.CascadeCategoryUpdate(ctx, oldName, name)
 
-	// Invalidate caches
 	u.rdb.Del(ctx, "homepage_platform_stats", "platform_categories")
 	return category, nil
 }
 
+// DeleteCategory deletes a category record, clearing it out from all related references.
 func (u *adminUsecase) DeleteCategory(ctx context.Context, id int64) error {
 	category, err := u.repo.GetCategoryByID(ctx, id)
 	if err != nil {
@@ -793,14 +806,13 @@ func (u *adminUsecase) DeleteCategory(ctx context.Context, id int64) error {
 		return err
 	}
 
-	// Cascade deletes
 	_ = u.repo.CascadeCategoryDelete(ctx, category.Name)
 
-	// Invalidate cache
 	u.rdb.Del(ctx, "homepage_platform_stats", "platform_categories")
 	return nil
 }
 
+// GetPlatformStats fetches landing page counters, calculating values dynamically if cache is expired.
 func (u *adminUsecase) GetPlatformStats(ctx context.Context) (map[string]interface{}, error) {
 	cacheKey := "homepage_platform_stats"
 	if val, err := u.rdb.Get(ctx, cacheKey).Result(); err == nil {
@@ -815,7 +827,6 @@ func (u *adminUsecase) GetPlatformStats(ctx context.Context) (map[string]interfa
 		return nil, err
 	}
 
-	// Compute values live
 	totalUsers, _ := u.repo.GetTotalUsersCount(ctx)
 	
 	today := time.Now()
@@ -854,6 +865,7 @@ func (u *adminUsecase) GetPlatformStats(ctx context.Context) (map[string]interfa
 	return payload, nil
 }
 
+// GetPlatformCategories lists unique categories strings for selection menus.
 func (u *adminUsecase) GetPlatformCategories(ctx context.Context) ([]string, error) {
 	cacheKey := "platform_categories"
 	if u.rdb != nil {
@@ -886,6 +898,7 @@ func (u *adminUsecase) GetPlatformCategories(ctx context.Context) ([]string, err
 	return cats, nil
 }
 
+// getStringField helper method extracts strings securely from arbitrary map elements.
 func getStringField(m map[string]interface{}, key string) string {
 	if val, ok := m[key].(string); ok {
 		return val
@@ -893,6 +906,7 @@ func getStringField(m map[string]interface{}, key string) string {
 	return ""
 }
 
+// invalidateTeacherCache clears caching records from Redis when teacher tasks or profiles are updated.
 func (u *adminUsecase) invalidateTeacherCache(ctx context.Context, teacherID int64) {
 	if u.rdb == nil {
 		return
@@ -919,17 +933,19 @@ func (u *adminUsecase) invalidateTeacherCache(ctx context.Context, teacherID int
 	}
 }
 
+// ListActiveJobPositions lists open active careers postings.
 func (u *adminUsecase) ListActiveJobPositions(ctx context.Context) ([]domain.JobPosition, error) {
 	return u.repo.ListActiveJobPositions(ctx)
 }
 
+// CreateJobApplication submits a new job application and fires an email alert asynchronously.
 func (u *adminUsecase) CreateJobApplication(ctx context.Context, app *domain.JobApplication) error {
 	app.Status = "applied"
 	if err := u.repo.CreateJobApplication(ctx, app); err != nil {
 		return err
 	}
 
-	// Trigger async confirmation email
+	// Trigger confirmation email
 	go func(email, name, role string) {
 		subject := "Application Received - ClaSynq"
 		body := fmt.Sprintf(
@@ -950,26 +966,32 @@ func (u *adminUsecase) CreateJobApplication(ctx context.Context, app *domain.Job
 	return nil
 }
 
+// ListJobApplications returns candidate applications.
 func (u *adminUsecase) ListJobApplications(ctx context.Context) ([]domain.JobApplication, error) {
 	return u.repo.ListJobApplications(ctx)
 }
 
+// GetAdminPositions returns all job openings for the administrative list view.
 func (u *adminUsecase) GetAdminPositions(ctx context.Context) ([]domain.JobPosition, error) {
 	return u.repo.ListJobPositions(ctx)
 }
 
+// CreateJobPosition creates a job position.
 func (u *adminUsecase) CreateJobPosition(ctx context.Context, jp *domain.JobPosition) error {
 	return u.repo.CreateJobPosition(ctx, jp)
 }
 
+// UpdateJobPosition updates attributes on a job position.
 func (u *adminUsecase) UpdateJobPosition(ctx context.Context, id int64, updates map[string]interface{}) (*domain.JobPosition, error) {
 	return u.repo.UpdateJobPosition(ctx, id, updates)
 }
 
+// DeleteJobPosition removes a job position.
 func (u *adminUsecase) DeleteJobPosition(ctx context.Context, id int64) error {
 	return u.repo.DeleteJobPosition(ctx, id)
 }
 
+// SendCandidateNotification triggers automated emails corresponding to selection, rejection, or interview rounds.
 func (u *adminUsecase) SendCandidateNotification(ctx context.Context, id int64, emailType, meetingLink, interviewDatetime string, joiningLetterName string, joiningLetterData []byte) error {
 	app, err := u.repo.GetJobApplicationByID(ctx, id)
 	if err != nil {
@@ -1084,3 +1106,4 @@ func (u *adminUsecase) SendCandidateNotification(ctx context.Context, id int64, 
 		return errors.New("invalid email_type")
 	}
 }
+

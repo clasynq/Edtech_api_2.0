@@ -29,6 +29,8 @@ func NewCbtExamUsecase(repo domain.CbtExamRepository, rdb *redis.Client) domain.
 	}
 }
 
+// StartAttempt verifies access, handles resume or auto-submission of expired attempts,
+// and pulls test questions, stripping answers/explanations to prevent cheating.
 func (u *cbtExamUsecase) StartAttempt(ctx context.Context, userID int64, testIDOrSlug string) (*domain.StudentTestAttempt, []domain.Question, error) {
 	test, err := u.repo.GetTestByIDOrSlug(ctx, testIDOrSlug)
 	if err != nil {
@@ -37,6 +39,7 @@ func (u *cbtExamUsecase) StartAttempt(ctx context.Context, userID int64, testIDO
 	if test == nil {
 		return nil, nil, errors.New("test not found")
 	}
+
 
 	student, err := u.repo.GetStudentByUserID(ctx, userID)
 	if err != nil {
@@ -135,6 +138,7 @@ func (u *cbtExamUsecase) StartAttempt(ctx context.Context, userID int64, testIDO
 	return attempt, questions, nil
 }
 
+// SubmitAnswer logs answers to individual questions during an active test, automatically grading correctness.
 func (u *cbtExamUsecase) SubmitAnswer(ctx context.Context, userID int64, attemptSlug string, questionID int64, selectedAnswer string) (*domain.StudentAnswer, error) {
 	attempt, err := u.repo.GetAttemptByIDOrSlug(ctx, attemptSlug)
 	if err != nil {
@@ -143,6 +147,7 @@ func (u *cbtExamUsecase) SubmitAnswer(ctx context.Context, userID int64, attempt
 	if attempt == nil {
 		return nil, errors.New("test attempt not found")
 	}
+
 
 	if attempt.Status != "ongoing" {
 		return nil, errors.New("this test attempt has already been submitted")
@@ -232,6 +237,7 @@ func (u *cbtExamUsecase) SubmitAnswer(ctx context.Context, userID int64, attempt
 	return ans, nil
 }
 
+// SubmitTest submits the test attempt, computes the final score metrics, and triggers leaderboard ranking updates.
 func (u *cbtExamUsecase) SubmitTest(ctx context.Context, userID int64, attemptSlug string) (*domain.TestResult, error) {
 	attempt, err := u.repo.GetAttemptByIDOrSlug(ctx, attemptSlug)
 	if err != nil {
@@ -240,6 +246,7 @@ func (u *cbtExamUsecase) SubmitTest(ctx context.Context, userID int64, attemptSl
 	if attempt == nil {
 		return nil, errors.New("test attempt not found")
 	}
+
 
 	if attempt.Status != "ongoing" {
 		// Return existing results if already submitted
@@ -356,6 +363,7 @@ func (u *cbtExamUsecase) SubmitTest(ctx context.Context, userID int64, attemptSl
 	return res, nil
 }
 
+// GetAttemptResult fetches complete detailed review answers and questions for a completed attempt.
 func (u *cbtExamUsecase) GetAttemptResult(ctx context.Context, userID int64, attemptSlug string) (map[string]interface{}, error) {
 	attempt, err := u.repo.GetAttemptByIDOrSlug(ctx, attemptSlug)
 	if err != nil {
@@ -364,6 +372,7 @@ func (u *cbtExamUsecase) GetAttemptResult(ctx context.Context, userID int64, att
 	if attempt == nil {
 		return nil, errors.New("attempt not found")
 	}
+
 
 	if attempt.Status != "submitted" {
 		return nil, errors.New("this test attempt has not been submitted yet")
@@ -526,6 +535,7 @@ func (u *cbtExamUsecase) GetAttemptResult(ctx context.Context, userID int64, att
 	return payload, nil
 }
 
+// GetLeaderboard retrieves the ranked top student list for a test, utilizing Redis cache configurations.
 func (u *cbtExamUsecase) GetLeaderboard(ctx context.Context, testIDOrSlug string) ([]map[string]interface{}, error) {
 	cacheKey := fmt.Sprintf("cbt_leaderboard:%s", testIDOrSlug)
 	if u.rdb != nil {
@@ -545,6 +555,7 @@ func (u *cbtExamUsecase) GetLeaderboard(ctx context.Context, testIDOrSlug string
 		return nil, errors.New("test not found")
 	}
 
+
 	leaderboard, err := u.repo.GetLeaderboard(ctx, test.ID)
 	if err != nil {
 		return nil, err
@@ -561,6 +572,7 @@ func (u *cbtExamUsecase) GetLeaderboard(ctx context.Context, testIDOrSlug string
 	return leaderboard, nil
 }
 
+// HasAccess asserts if a student has access rights to a test series package.
 func (u *cbtExamUsecase) HasAccess(ctx context.Context, userID int64, role string, seriesID int64) (bool, error) {
 	if role == "admin" || role == "teacher" {
 		return true, nil
@@ -573,6 +585,7 @@ func (u *cbtExamUsecase) HasAccess(ctx context.Context, userID int64, role strin
 	if ts == nil {
 		return false, errors.New("test series not found")
 	}
+
 
 	if ts.IsFree {
 		return true, nil
@@ -611,6 +624,7 @@ func (u *cbtExamUsecase) HasAccess(ctx context.Context, userID int64, role strin
 	return false, nil
 }
 
+// generateUniqueSlug generates a random alphanumeric identifier for attempts.
 func (u *cbtExamUsecase) generateUniqueSlug(ctx context.Context, kind string) (string, error) {
 	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	for i := 0; i < 10; i++ {
@@ -624,6 +638,7 @@ func (u *cbtExamUsecase) generateUniqueSlug(ctx context.Context, kind string) (s
 		}
 		slug := string(b)
 		if kind == "attempt" {
+
 			existing, _ := u.repo.GetAttemptByIDOrSlug(ctx, slug)
 			if existing == nil {
 				return slug, nil
@@ -633,6 +648,7 @@ func (u *cbtExamUsecase) generateUniqueSlug(ctx context.Context, kind string) (s
 	return "", errors.New("failed to generate unique slug")
 }
 
+// GetAttemptsMonitoring fetches student assessment metrics for instructor dashboard overviews.
 func (u *cbtExamUsecase) GetAttemptsMonitoring(ctx context.Context, userID int64, testIDStr string) (map[string]interface{}, error) {
 	test, err := u.repo.GetTestByIDOrSlug(ctx, testIDStr)
 	if err != nil {
@@ -641,6 +657,7 @@ func (u *cbtExamUsecase) GetAttemptsMonitoring(ctx context.Context, userID int64
 	if test == nil {
 		return nil, errors.New("test not found")
 	}
+
 
 	attempts, err := u.repo.GetAttemptsMonitoring(ctx, test.ID)
 	if err != nil {

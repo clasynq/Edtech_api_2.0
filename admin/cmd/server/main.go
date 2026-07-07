@@ -18,14 +18,17 @@ import (
 	"gorm.io/gorm/logger"
 )
 
+// main is the server entrypoint for the Admin panel microservice.
+// It initializes DB connections, config, dependency injection layers,
+// serves static uploaded files, and binds the router to port 8088.
 func main() {
-	// 1. Load config
+	// 1. Load config from environment or .env variables.
 	cfg := config.LoadConfig()
 	if cfg.Port == "" {
 		cfg.Port = "8088" // default port for admin service
 	}
 
-	// 2. Connect to Postgres
+	// 2. Connect to primary PostgreSQL instance.
 	log.Printf("Connecting to Postgres at: %s", cfg.DatabaseURL)
 	dbLogger := logger.New(
 		log.New(os.Stdout, "\r\n", log.LstdFlags),
@@ -39,12 +42,11 @@ func main() {
 	db, err := gorm.Open(postgres.Open(cfg.DatabaseURL), &gorm.Config{
 		Logger: dbLogger,
 	})
-
 	if err != nil {
 		log.Fatalf("failed to connect to database: %v", err)
 	}
 
-	// 3. Connect to Redis (optional/fail-safe)
+	// 3. Connect to Redis (optional/fail-safe caching setup).
 	var rdb *redis.Client
 	if cfg.RedisURL != "" {
 		opt, err := redis.ParseURL(cfg.RedisURL)
@@ -56,16 +58,16 @@ func main() {
 		}
 	}
 
-	// 4. Initialize Layers
+	// 4. Initialize Clean Architecture dependency injection layers.
 	repo := repository.NewPostgresAdminRepository(db)
 	uc := usecase.NewAdminUsecase(repo, rdb, cfg.SmtpHost, cfg.SmtpPort, cfg.SmtpUser, cfg.SmtpPass, cfg.DefaultFromEmail)
 	handler := delivery.NewHttpHandler(uc, cfg.SecretKey, cfg.MediaRoot, cfg.BaseURL)
 	authMiddleware := delivery.AuthMiddleware(cfg.SecretKey)
 
-	// 5. Initialize Router
+	// 5. Initialize the Gin HTTP router
 	r := gin.Default()
 
-	// Serve uploaded files statically for local development
+	// Serve uploaded files statically for local development / testing media files.
 	r.Static("/media", cfg.MediaRoot)
 	log.Printf("Serving static files from directory %s on /media route", cfg.MediaRoot)
 
@@ -81,3 +83,4 @@ func main() {
 		log.Fatalf("failed to start server: %v", err)
 	}
 }
+

@@ -9,6 +9,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// AuthMiddleware intercepts HTTP requests to parse and validate incoming Bearer access tokens.
+// Upon successful validation, it injects "userID" and "role" values into Gin context.
 func AuthMiddleware(secretKey string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
@@ -33,18 +35,21 @@ func AuthMiddleware(secretKey string) gin.HandlerFunc {
 			return
 		}
 
+		// Ensure we are working with access tokens rather than refresh tokens.
 		if claims.TokenType != "access" {
 			c.JSON(http.StatusUnauthorized, gin.H{"detail": "Token is not an access token."})
 			c.Abort()
 			return
 		}
 
+		// Inject properties to identify requester details in subsequent route controllers.
 		c.Set("userID", claims.SubID)
 		c.Set("role", claims.Role)
 		c.Next()
 	}
 }
 
+// RequireAdmin verifies that the authenticated requester's injected role matches "admin".
 func RequireAdmin() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		role, exists := c.Get("role")
@@ -60,3 +65,4 @@ func RequireAdmin() gin.HandlerFunc {
 		c.Next()
 	}
 }
+
