@@ -24,7 +24,8 @@ func NewPostgresCourseRepository(db *gorm.DB) domain.CourseRepository {
 
 func (r *postgresCourseRepository) GetCourses(ctx context.Context, role string, userID int64, isFeatured *bool, search string, category string, limit int) ([]domain.Course, error) {
 	var courses []domain.Course
-	query := r.db.WithContext(ctx).Model(&domain.Course{})
+	query := r.db.WithContext(ctx).Model(&domain.Course{}).
+		Select("courses.*, (SELECT COUNT(*) FROM enrollments WHERE enrollments.course_id = courses.id) AS total_students")
 
 	// 1. Role-based visibility filtering
 	switch role {
@@ -88,7 +89,8 @@ func (r *postgresCourseRepository) GetCourses(ctx context.Context, role string, 
 
 func (r *postgresCourseRepository) GetCourseByIDOrSlug(ctx context.Context, idOrSlug string, role string, userID int64) (*domain.Course, error) {
 	var course domain.Course
-	query := r.db.WithContext(ctx).Model(&domain.Course{})
+	query := r.db.WithContext(ctx).Model(&domain.Course{}).
+		Select("courses.*, (SELECT COUNT(*) FROM enrollments WHERE enrollments.course_id = courses.id) AS total_students")
 
 	if id, err := strconv.ParseInt(idOrSlug, 10, 64); err == nil {
 		query = query.Where("id = ?", id)
