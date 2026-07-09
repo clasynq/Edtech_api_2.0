@@ -102,6 +102,14 @@ func (u *userUsecase) Register(ctx context.Context, fullName, username, email, c
 		return map[string]interface{}{"code": "invalid_email_format", "message": "Invalid email address format."}, nil
 	}
 	emailDomain := emailParts[1]
+
+	// Only allow gmail.com and yahoo.com domains
+	if emailDomain != "gmail.com" && emailDomain != "yahoo.com" {
+		return map[string]interface{}{
+			"code":    "invalid_email_domain",
+			"message": "Invalid Email",
+		}, nil
+	}
 	
 	// Bypass MX lookup for common local testing/mock domains to avoid local development timeouts.
 	if emailDomain != "localhost" && !strings.HasSuffix(emailDomain, ".local") && emailDomain != "example.com" {
