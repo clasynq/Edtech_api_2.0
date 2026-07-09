@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/big"
 	"net"
+	"regexp"
 	"strings"
 	"time"
 
@@ -15,6 +16,13 @@ import (
 	"clasynq/api/auth/internal/utils"
 	"github.com/redis/go-redis/v9"
 )
+
+var (
+	usernameRegex = regexp.MustCompile(`^[a-zA-Z0-9_]{3,30}$`)
+	contactRegex  = regexp.MustCompile(`^\+?[0-9]{8,15}$`)
+	nameRegex     = regexp.MustCompile(`^[\p{L}\s.\-']{2,60}$`)
+)
+
 
 // userUsecase implements the domain.UserUsecase interface, encapsulating core business rules
 // for signups, multi-role logins, 2FA, OTP limits, profile management, and social follower linkages.
@@ -61,6 +69,32 @@ func (u *userUsecase) Register(ctx context.Context, fullName, username, email, c
 	email = strings.ToLower(strings.TrimSpace(email))
 	username = strings.ToLower(strings.TrimSpace(username))
 	contact = strings.TrimSpace(contact)
+	fullName = strings.TrimSpace(fullName)
+
+	// Validate fullName format (letters, spaces, no emojis)
+	if !nameRegex.MatchString(fullName) {
+		return map[string]interface{}{
+			"code":    "invalid_fullname",
+			"message": "Full name must be 2-60 characters and contain only letters and spaces (no emojis or special characters).",
+		}, nil
+	}
+
+	// Validate username format (alphanumeric and underscores)
+	if !usernameRegex.MatchString(username) {
+		return map[string]interface{}{
+			"code":    "invalid_username",
+			"message": "Username must be 3-30 characters and contain only letters, numbers, and underscores (no emojis).",
+		}, nil
+	}
+
+	// Validate contact number format
+	if !contactRegex.MatchString(contact) {
+		return map[string]interface{}{
+			"code":    "invalid_contact_number",
+			"message": "Contact number must be a valid phone number (8-15 digits, digits only or with a leading +).",
+		}, nil
+	}
+
 
 	// 1. Validate MX records for email domain to check deliverability.
 	emailParts := strings.Split(email, "@")

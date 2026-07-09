@@ -5,11 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
 	"clasynq/api/dashboard_profile/internal/domain"
 )
+
+var nameRegex = regexp.MustCompile(`^[\p{L}\s.\-']{2,60}$`)
+
 
 type profileUsecase struct {
 	repo domain.ProfileRepository
@@ -77,8 +81,13 @@ func (u *profileUsecase) UpdateMe(ctx context.Context, userID int64, updates map
 
 	// Update fields selectively
 	if val, ok := updates["fullName"].(string); ok {
+		val = strings.TrimSpace(val)
+		if !nameRegex.MatchString(val) {
+			return nil, errors.New("Full name must be 2-60 characters and contain only letters and spaces (no emojis or special characters).")
+		}
 		user.FullName = val
 	}
+
 	if val, ok := updates["avatarUrl"].(string); ok {
 		user.AvatarURL = val
 	}
