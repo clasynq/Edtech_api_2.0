@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -12,7 +13,22 @@ import (
 	"clasynq/api/dashboard_profile/internal/domain"
 )
 
-var nameRegex = regexp.MustCompile(`^[\p{L}\s.\-']{2,60}$`)
+var (
+	nameRegex    = regexp.MustCompile(`^[\p{L}\s.\-']{2,60}$`)
+	contactRegex = regexp.MustCompile(`^\+?[0-9]{8,15}$`)
+)
+
+func isValidURL(str string) bool {
+	if str == "" {
+		return true
+	}
+	u, err := url.ParseRequestURI(str)
+	if err != nil {
+		return false
+	}
+	return u.Scheme == "http" || u.Scheme == "https"
+}
+
 
 
 type profileUsecase struct {
@@ -88,6 +104,29 @@ func (u *profileUsecase) UpdateMe(ctx context.Context, userID int64, updates map
 		user.FullName = val
 	}
 
+	contactVal, exists := updates["contactNumber"]
+	if !exists {
+		contactVal, exists = updates["contact_number"]
+	}
+	if exists {
+		if val, ok := contactVal.(string); ok {
+			val = strings.TrimSpace(val)
+			if !contactRegex.MatchString(val) {
+				return nil, errors.New("Contact number must be a valid phone number (8-15 digits, digits only or with a leading +).")
+			}
+			
+			// Check if contact number is already taken by another user
+			existingContact, err := u.repo.GetUserByContact(ctx, val)
+			if err != nil {
+				return nil, err
+			}
+			if existingContact != nil && existingContact.ID != userID {
+				return nil, errors.New("Contact number is already in use by another user.")
+			}
+			user.ContactNumber = val
+		}
+	}
+
 	if val, ok := updates["avatarUrl"].(string); ok {
 		user.AvatarURL = val
 	}
@@ -101,15 +140,31 @@ func (u *profileUsecase) UpdateMe(ctx context.Context, userID int64, updates map
 		user.Skills = val
 	}
 	if val, ok := updates["website"].(string); ok {
+		val = strings.TrimSpace(val)
+		if val != "" && !isValidURL(val) {
+			return nil, errors.New("Website must be a valid URL (starting with http:// or https://).")
+		}
 		user.Website = val
 	}
 	if val, ok := updates["github"].(string); ok {
+		val = strings.TrimSpace(val)
+		if val != "" && !isValidURL(val) {
+			return nil, errors.New("GitHub link must be a valid URL (starting with http:// or https://).")
+		}
 		user.Github = val
 	}
 	if val, ok := updates["linkedin"].(string); ok {
+		val = strings.TrimSpace(val)
+		if val != "" && !isValidURL(val) {
+			return nil, errors.New("LinkedIn link must be a valid URL (starting with http:// or https://).")
+		}
 		user.Linkedin = val
 	}
 	if val, ok := updates["twitter"].(string); ok {
+		val = strings.TrimSpace(val)
+		if val != "" && !isValidURL(val) {
+			return nil, errors.New("Twitter link must be a valid URL (starting with http:// or https://).")
+		}
 		user.Twitter = val
 	}
 
@@ -125,6 +180,9 @@ func (u *profileUsecase) UpdateMe(ctx context.Context, userID int64, updates map
 				cleanDate := strings.Split(valStr, "T")[0]
 				t, err := time.Parse("2006-01-02", cleanDate)
 				if err == nil {
+					if t.After(time.Now()) {
+						return nil, errors.New("Date of birth cannot be in the future.")
+					}
 					user.DateOfBirth = &t
 				}
 			}

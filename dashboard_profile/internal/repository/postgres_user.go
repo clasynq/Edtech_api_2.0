@@ -29,6 +29,18 @@ func (r *postgresProfileRepository) GetUserByID(ctx context.Context, id int64) (
 	return &user, nil
 }
 
+func (r *postgresProfileRepository) GetUserByContact(ctx context.Context, contact string) (*domain.User, error) {
+	var user domain.User
+	if err := r.db.WithContext(ctx).Where("contact_number = ?", contact).First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &user, nil
+}
+
+
 func (r *postgresProfileRepository) GetStudentReferralsCount(ctx context.Context, userID int64) (int64, error) {
 	var count int64
 	err := r.db.WithContext(ctx).Table("payment_orders").

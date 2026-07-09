@@ -14,6 +14,7 @@ import (
 	"clasynq/api/auth/config"
 	"clasynq/api/auth/internal/domain"
 	"clasynq/api/auth/internal/utils"
+
 	"github.com/redis/go-redis/v9"
 )
 
@@ -22,7 +23,6 @@ var (
 	contactRegex  = regexp.MustCompile(`^\+?[0-9]{8,15}$`)
 	nameRegex     = regexp.MustCompile(`^[\p{L}\s.\-']{2,60}$`)
 )
-
 
 // userUsecase implements the domain.UserUsecase interface, encapsulating core business rules
 // for signups, multi-role logins, 2FA, OTP limits, profile management, and social follower linkages.
@@ -91,10 +91,9 @@ func (u *userUsecase) Register(ctx context.Context, fullName, username, email, c
 	if !contactRegex.MatchString(contact) {
 		return map[string]interface{}{
 			"code":    "invalid_contact_number",
-			"message": "Contact number must be a valid phone number (8-15 digits, digits only or with a leading +).",
+			"message": "Contact number must be a valid phone number (10-12 digits, digits only or with a leading +).",
 		}, nil
 	}
-
 
 	// 1. Validate MX records for email domain to check deliverability.
 	emailParts := strings.Split(email, "@")
@@ -110,7 +109,7 @@ func (u *userUsecase) Register(ctx context.Context, fullName, username, email, c
 			"message": "Invalid Email",
 		}, nil
 	}
-	
+
 	// Bypass MX lookup for common local testing/mock domains to avoid local development timeouts.
 	if emailDomain != "localhost" && !strings.HasSuffix(emailDomain, ".local") && emailDomain != "example.com" {
 		mxRecords, err := net.LookupMX(emailDomain)
@@ -976,34 +975,34 @@ func (u *userUsecase) compileStudentProfile(ctx context.Context, user *domain.Us
 	}
 
 	return map[string]interface{}{
-		"id":              user.ID,
-		"fullName":        user.FullName,
-		"username":        user.Username,
-		"contactNumber":   user.ContactNumber,
-		"email":           user.Email,
-		"role":            role,
-		"createdAt":       user.CreatedAt,
-		"followersCount":  len(followers),
-		"followingCount":  len(following),
-		"followersList":   followersList,
-		"followingList":   followingList,
-		"avatarUrl":       user.AvatarURL,
-		"avatar_url":      user.AvatarURL,
-		"headline":        user.Headline,
-		"bio":             user.Bio,
-		"skills":          user.Skills,
-		"website":         user.Website,
-		"github":          user.Github,
-		"linkedin":        user.Linkedin,
-		"twitter":         user.Twitter,
-		"emailAlerts":     user.EmailAlerts,
-		"directMessages":  user.DirectMessages,
-		"feedUpdates":     user.FeedUpdates,
-		"securityAlerts":  user.SecurityAlerts,
-		"coinsBalance":    user.CoinsBalance,
-		"referralCode":    user.ReferralCode,
-		"dateOfBirth":     user.DateOfBirth,
-		"referralsCount":  referralsCount,
+		"id":             user.ID,
+		"fullName":       user.FullName,
+		"username":       user.Username,
+		"contactNumber":  user.ContactNumber,
+		"email":          user.Email,
+		"role":           role,
+		"createdAt":      user.CreatedAt,
+		"followersCount": len(followers),
+		"followingCount": len(following),
+		"followersList":  followersList,
+		"followingList":  followingList,
+		"avatarUrl":      user.AvatarURL,
+		"avatar_url":     user.AvatarURL,
+		"headline":       user.Headline,
+		"bio":            user.Bio,
+		"skills":         user.Skills,
+		"website":        user.Website,
+		"github":         user.Github,
+		"linkedin":       user.Linkedin,
+		"twitter":        user.Twitter,
+		"emailAlerts":    user.EmailAlerts,
+		"directMessages": user.DirectMessages,
+		"feedUpdates":    user.FeedUpdates,
+		"securityAlerts": user.SecurityAlerts,
+		"coinsBalance":   user.CoinsBalance,
+		"referralCode":   user.ReferralCode,
+		"dateOfBirth":    user.DateOfBirth,
+		"referralsCount": referralsCount,
 	}, nil
 }
 
@@ -1042,5 +1041,3 @@ func (u *userUsecase) ToggleFollowUser(ctx context.Context, followerID, followed
 
 	return u.FollowUser(ctx, followerID, followedID)
 }
-
-
