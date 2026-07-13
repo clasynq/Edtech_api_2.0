@@ -136,7 +136,32 @@ func (r *postgresNoteRepository) GetNotes(ctx context.Context, filters map[strin
 		})
 	}
 
-	return notes, nil
+	type noteKey struct {
+		CourseID         int64
+		Title            string
+		FileURL          string
+		RecordedClassURL string
+	}
+	seen := make(map[noteKey]bool)
+	var uniqueNotes []domain.Note
+	for _, n := range notes {
+		var cid int64
+		if n.CourseID != nil {
+			cid = *n.CourseID
+		}
+		k := noteKey{
+			CourseID:         cid,
+			Title:            strings.TrimSpace(strings.ToLower(n.Title)),
+			FileURL:          n.FileURL,
+			RecordedClassURL: n.RecordedClassURL,
+		}
+		if !seen[k] {
+			seen[k] = true
+			uniqueNotes = append(uniqueNotes, n)
+		}
+	}
+
+	return uniqueNotes, nil
 }
 
 func (r *postgresNoteRepository) GetNoteByIDOrSlug(ctx context.Context, idOrSlug string) (*domain.Note, error) {

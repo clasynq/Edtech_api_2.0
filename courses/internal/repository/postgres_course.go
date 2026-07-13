@@ -8,6 +8,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 
 	"clasynq/api/courses/internal/domain"
 
@@ -330,7 +331,46 @@ func (r *postgresCourseRepository) ListSchedules(ctx context.Context, filters ma
 		r.populateVirtualFields(&schedules[i])
 	}
 
-	return schedules, nil
+	type scheduleKey struct {
+		CourseID    int64
+		ClassDate   string
+		StartTime   string
+		EndTime     string
+		TeacherID   int64
+		TopicName   string
+		SubjectID   int64
+		ClassStatus string
+	}
+
+	seen := make(map[scheduleKey]bool)
+	var uniqueSchedules []domain.ClassSchedule
+
+	for _, s := range schedules {
+		var subID int64
+		if s.SubjectID != nil {
+			subID = *s.SubjectID
+		}
+
+		dateStr := time.Time(s.ClassDate).Format("2006-01-02")
+
+		k := scheduleKey{
+			CourseID:    s.CourseID,
+			ClassDate:   dateStr,
+			StartTime:   string(s.StartTime),
+			EndTime:     string(s.EndTime),
+			TeacherID:   s.TeacherID,
+			TopicName:   strings.TrimSpace(strings.ToLower(s.TopicName)),
+			SubjectID:   subID,
+			ClassStatus: s.ClassStatus,
+		}
+
+		if !seen[k] {
+			seen[k] = true
+			uniqueSchedules = append(uniqueSchedules, s)
+		}
+	}
+
+	return uniqueSchedules, nil
 }
 
 func (r *postgresCourseRepository) GetScheduleByID(ctx context.Context, id int64) (*domain.ClassSchedule, error) {

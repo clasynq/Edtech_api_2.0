@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"clasynq/api/dashboard_profile/internal/domain"
@@ -292,7 +293,10 @@ func (r *postgresProfileRepository) GetClassSchedulesByCourseIDsAndDateRange(ctx
 		Where("course_id IN (?) AND class_date >= ? AND class_date <= ?", courseIDs, startDate.Format("2006-01-02"), endDate.Format("2006-01-02")).
 		Order("class_date ASC, start_time ASC").
 		Find(&schedules).Error
-	return schedules, err
+	if err != nil {
+		return nil, err
+	}
+	return deduplicateProfileSchedules(schedules), nil
 }
 
 func (r *postgresProfileRepository) GetCompletedClassSchedulesByCourseIDs(ctx context.Context, courseIDs []int64) ([]domain.ClassSchedule, error) {
@@ -305,5 +309,47 @@ func (r *postgresProfileRepository) GetCompletedClassSchedulesByCourseIDs(ctx co
 		Where("course_id IN (?) AND class_status = 'completed'", courseIDs).
 		Order("class_date DESC, start_time DESC").
 		Find(&schedules).Error
-	return schedules, err
+	if err != nil {
+		return nil, err
+	}
+	return deduplicateProfileSchedules(schedules), nil
+}
+
+func deduplicateProfileSchedules(schedules []domain.ClassSchedule) []domain.ClassSchedule {
+	type key struct {
+		CourseID    int64
+		ClassDate   string
+		StartTime   string
+		EndTime     string
+		TeacherID   int64
+		TopicName   string
+		SubjectID   int64
+		ClassStatus string
+	}
+
+	seen := make(map[key]bool)
+	var unique []domain.ClassSchedule
+
+	for _, s := range schedules {
+		var subID int64
+		if s.SubjectID != nil {
+			subID = *s.SubjectID
+		}
+		dateStr := time.Time(s.ClassDate).Format("2006-01-02")
+		k := key{
+			CourseID:    s.CourseID,
+			ClassDate:   dateStr,
+			StartTime:   string(s.StartTime),
+			EndTime:     string(s.EndTime),
+			TeacherID:   s.TeacherID,
+			TopicName:   strings.TrimSpace(strings.ToLower(s.TopicName)),
+			SubjectID:   subID,
+			ClassStatus: s.ClassStatus,
+		}
+		if !seen[k] {
+			seen[k] = true
+			unique = append(unique, s)
+		}
+	}
+	return unique
 }
