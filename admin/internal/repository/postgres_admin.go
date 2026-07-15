@@ -280,6 +280,15 @@ func (r *postgresAdminRepository) GetStudentEnrollmentInfo(ctx context.Context, 
 		}
 	}
 
+	appendUnique := func(slice []string, val string) []string {
+		for _, s := range slice {
+			if s == val {
+				return slice
+			}
+		}
+		return append(slice, val)
+	}
+
 	var subjectsResults []struct {
 		CourseID    int64  `gorm:"column:course_id"`
 		SubjectName string `gorm:"column:subject_name"`
@@ -298,16 +307,31 @@ func (r *postgresAdminRepository) GetStudentEnrollmentInfo(ctx context.Context, 
 
 	courseSubjects := make(map[int64][]string)
 	for _, sub := range subjectsResults {
-		courseSubjects[sub.CourseID] = append(courseSubjects[sub.CourseID], sub.SubjectName)
+		courseSubjects[sub.CourseID] = appendUnique(courseSubjects[sub.CourseID], sub.SubjectName)
 	}
 
-	appendUnique := func(slice []string, val string) []string {
-		for _, s := range slice {
-			if s == val {
-				return slice
-			}
+	// Query joint teachers assigned to these courses
+	var jointTeachersResults []struct {
+		CourseID    int64  `gorm:"column:course_id"`
+		TeacherName string `gorm:"column:teacher_name"`
+	}
+
+	if len(courseIDs) > 0 {
+		err = r.db.WithContext(ctx).Table("courses_teachers").
+			Select("courses_teachers.course_id, teachers.name as teacher_name").
+			Joins("JOIN teachers ON teachers.id = courses_teachers.teacher_id").
+			Where("courses_teachers.course_id IN ?", courseIDs).
+			Scan(&jointTeachersResults).Error
+		if err != nil {
+			return nil, nil, nil, nil, err
 		}
-		return append(slice, val)
+	}
+
+	courseTeachers := make(map[int64][]string)
+	for _, jt := range jointTeachersResults {
+		if jt.TeacherName != "" {
+			courseTeachers[jt.CourseID] = appendUnique(courseTeachers[jt.CourseID], jt.TeacherName)
+		}
 	}
 
 	coursesMap := make(map[int64][]string)
@@ -318,9 +342,16 @@ func (r *postgresAdminRepository) GetStudentEnrollmentInfo(ctx context.Context, 
 	for _, res := range results {
 		coursesMap[res.StudentID] = appendUnique(coursesMap[res.StudentID], res.CourseName)
 		batchesMap[res.StudentID] = appendUnique(batchesMap[res.StudentID], res.BatchID)
+		
+		// Add primary teacher name
 		if res.TeacherName != "" {
 			teachersMap[res.StudentID] = appendUnique(teachersMap[res.StudentID], res.TeacherName)
 		}
+		// Add joint teachers names
+		for _, jtName := range courseTeachers[res.CourseID] {
+			teachersMap[res.StudentID] = appendUnique(teachersMap[res.StudentID], jtName)
+		}
+
 		for _, subName := range courseSubjects[res.CourseID] {
 			subjectsMap[res.StudentID] = appendUnique(subjectsMap[res.StudentID], subName)
 		}
