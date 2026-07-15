@@ -413,6 +413,7 @@ func (r *postgresEnrollmentRepository) GetMyEnrollments(ctx context.Context, stu
 			"id":               res.EnrollmentID,
 			"slug":             res.BatchID,
 			"title":            res.CourseName,
+			"courseId":         res.CourseID,
 			"category":         res.Category,
 			"level":            "All levels",
 			"mentor":           mentorName,
