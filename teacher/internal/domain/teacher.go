@@ -176,6 +176,7 @@ type TeacherUsecase interface {
 	GetClasses(ctx context.Context, teacherID int64, category string) ([]map[string]interface{}, error)
 	ScheduleClass(ctx context.Context, teacherID int64, scheduleData map[string]interface{}) (map[string]interface{}, error)
 	UpdateClass(ctx context.Context, teacherID, classID int64, updates map[string]interface{}) (map[string]interface{}, error)
+	UpdateTaskClass(ctx context.Context, teacherID int64, taskID string, updates map[string]interface{}) (map[string]interface{}, error)
 	DeleteClass(ctx context.Context, teacherID, classID int64) error
 	UploadNote(ctx context.Context, teacherID int64, batchID, title, fileURL, recordedClassURL, subject, topic, prerequisiteURL, description string) (map[string]interface{}, error)
 	GetCategories(ctx context.Context, teacherID int64) ([]string, error)

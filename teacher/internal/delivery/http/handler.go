@@ -159,11 +159,7 @@ func (h *HttpHandler) GetClassDetail(c *gin.Context) {
 func (h *HttpHandler) UpdateClass(c *gin.Context) {
 	teacherID := c.MustGet("userID").(int64)
 	idStr := c.Param("id")
-	classID, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid class schedule ID"})
-		return
-	}
+	var err error
 
 	// Parse fields
 	updates := make(map[string]interface{})
@@ -251,7 +247,19 @@ func (h *HttpHandler) UpdateClass(c *gin.Context) {
 		}
 	}
 
-	res, err := h.usecase.UpdateClass(c.Request.Context(), teacherID, classID, updates)
+	var res map[string]interface{}
+	if strings.HasPrefix(idStr, "task-") {
+		res, err = h.usecase.UpdateTaskClass(c.Request.Context(), teacherID, idStr, updates)
+	} else {
+		var classID int64
+		classID, err = strconv.ParseInt(idStr, 10, 64)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "invalid class schedule ID"})
+			return
+		}
+		res, err = h.usecase.UpdateClass(c.Request.Context(), teacherID, classID, updates)
+	}
+
 	if err != nil {
 		if strings.Contains(err.Error(), "permission") {
 			c.JSON(http.StatusForbidden, gin.H{"message": err.Error()})

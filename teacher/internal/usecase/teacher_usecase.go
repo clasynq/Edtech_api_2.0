@@ -1157,3 +1157,309 @@ func (u *teacherUsecase) SendNotice(ctx context.Context, teacherID int64, batchI
 		"sent_count": sentCount,
 	}, nil
 }
+
+func (u *teacherUsecase) UpdateTaskClass(ctx context.Context, teacherID int64, taskID string, updates map[string]interface{}) (map[string]interface{}, error) {
+	// 1. Fetch teacher profile
+	teacher, err := u.repo.GetTeacherByID(ctx, teacherID)
+	if err != nil {
+		return nil, err
+	}
+	if teacher == nil {
+		return nil, errors.New("teacher not found")
+	}
+
+	// 2. Parse task-tIdx-sIdx
+	parts := strings.Split(taskID, "-")
+	if len(parts) < 3 || parts[0] != "task" {
+		return nil, errors.New("invalid task schedule format")
+	}
+	tIdx, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return nil, errors.New("invalid task index")
+	}
+	sIdx, err := strconv.Atoi(parts[2])
+	if err != nil {
+		return nil, errors.New("invalid schedule index")
+	}
+
+	// 3. Unmarshal teacher.Tasks JSON
+	if teacher.Tasks == "" || teacher.Tasks == "[]" {
+		return nil, errors.New("teacher tasks list is empty")
+	}
+
+	type TaskItem struct {
+		Batch     string `json:"batch"`
+		Course    string `json:"course"`
+		Task      string `json:"task"`
+		Schedules []struct {
+			Date string `json:"date"`
+			Time string `json:"time"`
+		} `json:"schedules"`
+	}
+
+	var tasks []TaskItem
+	if err := json.Unmarshal([]byte(teacher.Tasks), &tasks); err != nil {
+		return nil, errors.New("failed to parse teacher tasks")
+	}
+
+	if tIdx < 0 || tIdx >= len(tasks) {
+		return nil, errors.New("task index out of bounds")
+	}
+	taskItem := tasks[tIdx]
+	if sIdx < 0 || sIdx >= len(taskItem.Schedules) {
+		return nil, errors.New("schedule index out of bounds")
+	}
+	taskSched := taskItem.Schedules[sIdx]
+
+	// 4. Resolve course matching batchID
+	courses, err := u.repo.GetCoursesByTeacher(ctx, teacherID, "")
+	if err != nil {
+		return nil, err
+	}
+	var courseObj *domain.Course
+	for i := range courses {
+		if courses[i].BatchID == taskItem.Batch {
+			courseObj = &courses[i]
+			break
+		}
+	}
+	if courseObj == nil && taskItem.Course != "" {
+		for i := range courses {
+			if strings.ToLower(courses[i].CourseName) == strings.ToLower(taskItem.Course) {
+				courseObj = &courses[i]
+				break
+			}
+		}
+	}
+	if courseObj == nil {
+		return nil, errors.New("could not resolve course/batch for this task schedule")
+	}
+
+	// Calculate end time helper (2 hours after start_time)
+	originalTimeStr := taskSched.Time
+	if originalTimeStr == "" {
+		originalTimeStr = "10:00"
+	}
+	originalStartTime := originalTimeStr
+	if len(originalStartTime) == 5 {
+		originalStartTime = originalStartTime + ":00"
+	}
+	originalEndTime := originalStartTime
+	tObj, err := time.Parse("15:04", originalTimeStr)
+	if err == nil {
+		originalEndTime = tObj.Add(2 * time.Hour).Format("15:04:05")
+	}
+
+	// 5. Check requested classStatus
+	var classStatus string
+	if status, ok := updates["classStatus"].(string); ok && status != "" {
+		classStatus = status
+	} else if status, ok := updates["class_status"].(string); ok && status != "" {
+		classStatus = status
+	}
+
+	if classStatus == "" {
+		return nil, errors.New("class status is required for updates")
+	}
+
+	originalDate, err := time.Parse("2006-01-02", taskSched.Date)
+	if err != nil {
+		return nil, errors.New("invalid task original date format")
+	}
+
+	var notesURL *string
+	if n, ok := updates["classNotesUrl"].(string); ok {
+		notesURL = &n
+	} else if n, ok := updates["class_notes_url"].(string); ok {
+		notesURL = &n
+	}
+
+	var recordedURL *string
+	if r, ok := updates["recordedClassUrl"].(string); ok {
+		recordedURL = &r
+	} else if r, ok := updates["recorded_class_url"].(string); ok {
+		recordedURL = &r
+	}
+
+	var description *string
+	if d, ok := updates["description"].(string); ok {
+		description = &d
+	}
+
+	var subjectID *int64
+	if s, ok := updates["subject"]; ok && s != nil {
+		subID := u.toInt64(s)
+		if subID > 0 {
+			subjectID = &subID
+		}
+	}
+
+	// 6. Handle action based on status
+	if classStatus == "rescheduled" {
+		// We need to parse rescheduled date/time/reason
+		var newDateStr string
+		if d, ok := updates["classDate"].(string); ok && d != "" {
+			newDateStr = d
+		} else if d, ok := updates["class_date"].(string); ok && d != "" {
+			newDateStr = d
+		}
+		if newDateStr == "" {
+			return nil, errors.New("reschedule date is required")
+		}
+		newDate, err := time.Parse("2006-01-02", newDateStr)
+		if err != nil {
+			return nil, errors.New("invalid reschedule date format")
+		}
+
+		var newStartTime string
+		if t, ok := updates["startTime"].(string); ok && t != "" {
+			newStartTime = t
+		} else if t, ok := updates["start_time"].(string); ok && t != "" {
+			newStartTime = t
+		}
+		if newStartTime == "" {
+			newStartTime = "10:00"
+		}
+		if len(newStartTime) == 5 {
+			newStartTime = newStartTime + ":00"
+		}
+
+		var newEndTime string
+		if t, ok := updates["endTime"].(string); ok && t != "" {
+			newEndTime = t
+		} else if t, ok := updates["end_time"].(string); ok && t != "" {
+			newEndTime = t
+		}
+		if newEndTime == "" {
+			newEndTime = newStartTime
+			tObj, err := time.Parse("15:04", newStartTime[:5])
+			if err == nil {
+				newEndTime = tObj.Add(2 * time.Hour).Format("15:04:05")
+			}
+		}
+		if len(newEndTime) == 5 {
+			newEndTime = newEndTime + ":00"
+		}
+
+		var reason string
+		if r, ok := updates["rescheduleReason"].(string); ok {
+			reason = r
+		} else if r, ok := updates["reschedule_reason"].(string); ok {
+			reason = r
+		}
+
+		// Create original slot as RESCHEDULED in DB
+		origReason := fmt.Sprintf("Rescheduled to %s %s: %s", newDateStr, newStartTime[:5], reason)
+		origSched := &domain.ClassSchedule{
+			CourseID:         courseObj.ID,
+			SubjectID:        subjectID,
+			BatchID:          courseObj.BatchID,
+			TeacherID:        teacherID,
+			TopicName:        taskItem.Task,
+			ClassDate:        originalDate,
+			StartTime:        originalStartTime,
+			EndTime:          originalEndTime,
+			ClassStatus:      "rescheduled",
+			RescheduleReason: &origReason,
+			CreatedAt:        time.Now(),
+		}
+		if err := u.repo.CreateClassSchedule(ctx, origSched); err != nil {
+			return nil, err
+		}
+
+		// Create rescheduled active slot as PENDING in DB
+		newSched := &domain.ClassSchedule{
+			CourseID:         courseObj.ID,
+			SubjectID:        subjectID,
+			BatchID:          courseObj.BatchID,
+			TeacherID:        teacherID,
+			TopicName:        taskItem.Task,
+			ClassDate:        newDate,
+			StartTime:        newStartTime,
+			EndTime:          newEndTime,
+			ClassStatus:      "pending",
+			RescheduleReason: &reason,
+			CreatedAt:        time.Now(),
+		}
+		if err := u.repo.CreateClassSchedule(ctx, newSched); err != nil {
+			return nil, err
+		}
+
+		_ = u.repo.LogTeacherActivity(ctx, teacherID, "Rescheduled", "Class Session", fmt.Sprintf("%s to %s", taskItem.Task, newDateStr))
+		u.invalidateCache(ctx, teacherID)
+		
+		fullSched, _ := u.repo.GetClassScheduleByID(ctx, newSched.ID)
+		if fullSched != nil {
+			return u.serializeSchedule(ctx, *fullSched), nil
+		}
+		return u.serializeSchedule(ctx, *newSched), nil
+
+	} else if classStatus == "completed" {
+		// Create completed record in DB
+		sched := &domain.ClassSchedule{
+			CourseID:         courseObj.ID,
+			SubjectID:        subjectID,
+			BatchID:          courseObj.BatchID,
+			TeacherID:        teacherID,
+			TopicName:        taskItem.Task,
+			ClassDate:        originalDate,
+			StartTime:        originalStartTime,
+			EndTime:          originalEndTime,
+			ClassStatus:      "completed",
+			ClassNotesURL:    notesURL,
+			RecordedClassURL: recordedURL,
+			Description:      description,
+			CreatedAt:        time.Now(),
+		}
+		if err := u.repo.CreateClassSchedule(ctx, sched); err != nil {
+			return nil, err
+		}
+
+		_ = u.repo.LogTeacherActivity(ctx, teacherID, "Completed", "Class Session", taskItem.Task)
+		u.invalidateCache(ctx, teacherID)
+		u.invalidateNotesCache(ctx)
+
+		fullSched, _ := u.repo.GetClassScheduleByID(ctx, sched.ID)
+		if fullSched != nil {
+			return u.serializeSchedule(ctx, *fullSched), nil
+		}
+		return u.serializeSchedule(ctx, *sched), nil
+
+	} else if classStatus == "cancelled" {
+		var reason string
+		if r, ok := updates["rescheduleReason"].(string); ok {
+			reason = r
+		} else if r, ok := updates["reschedule_reason"].(string); ok {
+			reason = r
+		}
+
+		// Create cancelled record in DB
+		sched := &domain.ClassSchedule{
+			CourseID:         courseObj.ID,
+			SubjectID:        subjectID,
+			BatchID:          courseObj.BatchID,
+			TeacherID:        teacherID,
+			TopicName:        taskItem.Task,
+			ClassDate:        originalDate,
+			StartTime:        originalStartTime,
+			EndTime:          originalEndTime,
+			ClassStatus:      "cancelled",
+			RescheduleReason: &reason,
+			CreatedAt:        time.Now(),
+		}
+		if err := u.repo.CreateClassSchedule(ctx, sched); err != nil {
+			return nil, err
+		}
+
+		_ = u.repo.LogTeacherActivity(ctx, teacherID, "Cancelled", "Class Session", taskItem.Task)
+		u.invalidateCache(ctx, teacherID)
+
+		fullSched, _ := u.repo.GetClassScheduleByID(ctx, sched.ID)
+		if fullSched != nil {
+			return u.serializeSchedule(ctx, *fullSched), nil
+		}
+		return u.serializeSchedule(ctx, *sched), nil
+	}
+
+	return nil, errors.New("unsupported class status update")
+}
