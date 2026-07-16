@@ -1359,7 +1359,7 @@ func (u *teacherUsecase) UpdateTaskClass(ctx context.Context, teacherID int64, t
 			ClassDate:        originalDate,
 			StartTime:        originalStartTime,
 			EndTime:          originalEndTime,
-			ClassStatus:      "rescheduled",
+			ClassStatus:      "cancelled",
 			RescheduleReason: &origReason,
 			CreatedAt:        time.Now(),
 		}
