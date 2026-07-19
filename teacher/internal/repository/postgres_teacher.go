@@ -208,7 +208,7 @@ func (r *postgresTeacherRepository) CreateNote(ctx context.Context, note *domain
 
 func (r *postgresTeacherRepository) GetCourseByBatchID(ctx context.Context, batchID string) (*domain.Course, error) {
 	var course domain.Course
-	err := r.db.WithContext(ctx).Where("LOWER(batch_id) = ?", strings.ToLower(batchID)).First(&course).Error
+	err := r.db.WithContext(ctx).Preload("Teachers").Where("LOWER(batch_id) = ?", strings.ToLower(batchID)).First(&course).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
