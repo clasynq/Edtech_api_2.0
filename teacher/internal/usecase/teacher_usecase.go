@@ -524,6 +524,38 @@ func (u *teacherUsecase) ScheduleClass(ctx context.Context, teacherID int64, sch
 		}
 	}
 
+	if schedule.SubjectID == nil {
+		subs, _ := u.repo.GetSubjectsForCourse(ctx, course.ID)
+		topicLower := strings.ToLower(topicName)
+		for _, sub := range subs {
+			subLower := strings.ToLower(sub.SubjectName)
+			if subLower != "" && (strings.Contains(topicLower, subLower) || strings.Contains(subLower, topicLower)) {
+				schedule.SubjectID = &sub.ID
+				break
+			}
+		}
+		
+		if schedule.SubjectID == nil {
+			if strings.Contains(topicLower, "machine learning") || strings.Contains(topicLower, " ml ") || strings.HasPrefix(topicLower, "ml ") || strings.HasSuffix(topicLower, " ml") || topicLower == "ml" {
+				for _, sub := range subs {
+					subNameLower := strings.ToLower(sub.SubjectName)
+					if subNameLower == "ml" || strings.Contains(subNameLower, "machine learning") {
+						schedule.SubjectID = &sub.ID
+						break
+					}
+				}
+			} else if strings.Contains(topicLower, "artificial intelligence") || strings.Contains(topicLower, " ai ") || strings.HasPrefix(topicLower, "ai ") || strings.HasSuffix(topicLower, " ai") || topicLower == "ai" {
+				for _, sub := range subs {
+					subNameLower := strings.ToLower(sub.SubjectName)
+					if subNameLower == "ai" || strings.Contains(subNameLower, "artificial intelligence") {
+						schedule.SubjectID = &sub.ID
+						break
+					}
+				}
+			}
+		}
+	}
+
 	if err := u.repo.CreateClassSchedule(ctx, schedule); err != nil {
 		return nil, err
 	}
@@ -796,16 +828,71 @@ func (u *teacherUsecase) serializeSchedule(ctx context.Context, s domain.ClassSc
 				meetingLink = sub.MeetingLink
 			}
 		}
-	} else {
-		// Resolve using course subjects
-		if s.Course.ID != 0 {
-			subs, _ := u.repo.GetSubjectsForCourse(ctx, s.Course.ID)
-			if len(subs) > 0 {
+	}
+
+	if s.Course.ID != 0 {
+		subs, _ := u.repo.GetSubjectsForCourse(ctx, s.Course.ID)
+		if len(subs) > 0 {
+			if subjectName == "No Subject Assigned" {
 				subjectName = subs[0].SubjectName
+			}
+			
+			// Smart meeting link resolution: match topic_name against subjects
+			if meetingLink == "" || meetingLink == s.Course.MeetingLink {
+				topicLower := strings.ToLower(s.TopicName)
+				var matchedSubLink string
+				var matchedSubName string
+				
 				for _, sub := range subs {
-					if sub.MeetingLink != "" {
-						meetingLink = sub.MeetingLink
-						break
+					subNameLower := strings.ToLower(sub.SubjectName)
+					if subNameLower != "" && (strings.Contains(topicLower, subNameLower) || strings.Contains(subNameLower, topicLower)) {
+						if sub.MeetingLink != "" {
+							matchedSubLink = sub.MeetingLink
+							matchedSubName = sub.SubjectName
+							break
+						}
+					}
+				}
+				
+				// Check for common acronyms like AI / ML
+				if matchedSubLink == "" {
+					if strings.Contains(topicLower, "machine learning") || strings.Contains(topicLower, " ml ") || strings.HasPrefix(topicLower, "ml ") || strings.HasSuffix(topicLower, " ml") || topicLower == "ml" {
+						for _, sub := range subs {
+							subNameLower := strings.ToLower(sub.SubjectName)
+							if subNameLower == "ml" || strings.Contains(subNameLower, "machine learning") {
+								if sub.MeetingLink != "" {
+									matchedSubLink = sub.MeetingLink
+									matchedSubName = sub.SubjectName
+									break
+								}
+							}
+						}
+					} else if strings.Contains(topicLower, "artificial intelligence") || strings.Contains(topicLower, " ai ") || strings.HasPrefix(topicLower, "ai ") || strings.HasSuffix(topicLower, " ai") || topicLower == "ai" {
+						for _, sub := range subs {
+							subNameLower := strings.ToLower(sub.SubjectName)
+							if subNameLower == "ai" || strings.Contains(subNameLower, "artificial intelligence") {
+								if sub.MeetingLink != "" {
+									matchedSubLink = sub.MeetingLink
+									matchedSubName = sub.SubjectName
+									break
+								}
+							}
+						}
+					}
+				}
+
+				if matchedSubLink != "" {
+					meetingLink = matchedSubLink
+					if s.SubjectID == nil && matchedSubName != "" {
+						subjectName = matchedSubName
+					}
+				} else if meetingLink == "" {
+					// Fallback to first non-empty subject link
+					for _, sub := range subs {
+						if sub.MeetingLink != "" {
+							meetingLink = sub.MeetingLink
+							break
+						}
 					}
 				}
 			}
@@ -920,24 +1007,59 @@ func (u *teacherUsecase) buildTaskSchedules(ctx context.Context, teacher *domain
 			}
 
 			subjectName := courseName
-			if subjectName == "" {
-				subjectName = "No Subject Assigned"
-			}
-
-			// Meeting link resolution
 			meetingLink := courseObj.MeetingLink
 			subs, _ := u.repo.GetSubjectsForCourse(ctx, courseObj.ID)
-			for _, s := range subs {
-				if strings.ToLower(s.SubjectName) == strings.ToLower(subjectName) && s.MeetingLink != "" {
-					meetingLink = s.MeetingLink
+			
+			topicLower := strings.ToLower(topicName)
+			var matchedSub *domain.Subject
+			
+			for _, sub := range subs {
+				subLower := strings.ToLower(sub.SubjectName)
+				if subLower != "" && (strings.Contains(topicLower, subLower) || strings.Contains(subLower, topicLower)) {
+					matchedSub = &sub
 					break
 				}
 			}
-			if meetingLink == "" && len(subs) > 0 {
-				for _, s := range subs {
-					if s.MeetingLink != "" {
-						meetingLink = s.MeetingLink
-						break
+			
+			if matchedSub == nil {
+				if strings.Contains(topicLower, "machine learning") || strings.Contains(topicLower, " ml ") || strings.HasPrefix(topicLower, "ml ") || strings.HasSuffix(topicLower, " ml") || topicLower == "ml" {
+					for _, sub := range subs {
+						subNameLower := strings.ToLower(sub.SubjectName)
+						if subNameLower == "ml" || strings.Contains(subNameLower, "machine learning") {
+							matchedSub = &sub
+							break
+						}
+					}
+				} else if strings.Contains(topicLower, "artificial intelligence") || strings.Contains(topicLower, " ai ") || strings.HasPrefix(topicLower, "ai ") || strings.HasSuffix(topicLower, " ai") || topicLower == "ai" {
+					for _, sub := range subs {
+						subNameLower := strings.ToLower(sub.SubjectName)
+						if subNameLower == "ai" || strings.Contains(subNameLower, "artificial intelligence") {
+							matchedSub = &sub
+							break
+						}
+					}
+				}
+			}
+
+			if matchedSub != nil {
+				subjectName = matchedSub.SubjectName
+				if matchedSub.MeetingLink != "" {
+					meetingLink = matchedSub.MeetingLink
+				}
+			} else {
+				if subjectName == "" {
+					if len(subs) > 0 {
+						subjectName = subs[0].SubjectName
+					} else {
+						subjectName = "No Subject Assigned"
+					}
+				}
+				if meetingLink == "" && len(subs) > 0 {
+					for _, sub := range subs {
+						if sub.MeetingLink != "" {
+							meetingLink = sub.MeetingLink
+							break
+						}
 					}
 				}
 			}
@@ -1291,6 +1413,38 @@ func (u *teacherUsecase) UpdateTaskClass(ctx context.Context, teacherID int64, t
 		subID := u.toInt64(s)
 		if subID > 0 {
 			subjectID = &subID
+		}
+	}
+
+	if subjectID == nil && courseObj != nil {
+		subs, _ := u.repo.GetSubjectsForCourse(ctx, courseObj.ID)
+		topicLower := strings.ToLower(taskItem.Task)
+		for _, sub := range subs {
+			subLower := strings.ToLower(sub.SubjectName)
+			if subLower != "" && (strings.Contains(topicLower, subLower) || strings.Contains(subLower, topicLower)) {
+				subjectID = &sub.ID
+				break
+			}
+		}
+		
+		if subjectID == nil {
+			if strings.Contains(topicLower, "machine learning") || strings.Contains(topicLower, " ml ") || strings.HasPrefix(topicLower, "ml ") || strings.HasSuffix(topicLower, " ml") || topicLower == "ml" {
+				for _, sub := range subs {
+					subNameLower := strings.ToLower(sub.SubjectName)
+					if subNameLower == "ml" || strings.Contains(subNameLower, "machine learning") {
+						subjectID = &sub.ID
+						break
+					}
+				}
+			} else if strings.Contains(topicLower, "artificial intelligence") || strings.Contains(topicLower, " ai ") || strings.HasPrefix(topicLower, "ai ") || strings.HasSuffix(topicLower, " ai") || topicLower == "ai" {
+				for _, sub := range subs {
+					subNameLower := strings.ToLower(sub.SubjectName)
+					if subNameLower == "ai" || strings.Contains(subNameLower, "artificial intelligence") {
+						subjectID = &sub.ID
+						break
+					}
+				}
+			}
 		}
 	}
 

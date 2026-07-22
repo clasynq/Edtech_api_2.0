@@ -476,7 +476,18 @@ func (u *profileUsecase) GetStudyDashboard(ctx context.Context, userID int64, ca
 		subjectName := ""
 		if s.Subject != nil {
 			subjectName = s.Subject.SubjectName
-		} else if s.Course != nil && s.Teacher != nil && len(s.Course.TeacherSubjects) > 0 {
+		} else if s.Course != nil && len(s.Course.Subjects) > 0 {
+			topicLower := strings.ToLower(s.TopicName)
+			for _, sub := range s.Course.Subjects {
+				subLower := strings.ToLower(sub.SubjectName)
+				if subLower != "" && (strings.Contains(topicLower, subLower) || strings.Contains(subLower, topicLower)) {
+					subjectName = sub.SubjectName
+					break
+				}
+			}
+		}
+
+		if subjectName == "" && s.Course != nil && s.Teacher != nil && len(s.Course.TeacherSubjects) > 0 {
 			var teacherSubjects map[string][]int64
 			if err := json.Unmarshal(s.Course.TeacherSubjects, &teacherSubjects); err == nil {
 				teacherIDStr := fmt.Sprintf("%d", s.TeacherID)
@@ -498,7 +509,58 @@ func (u *profileUsecase) GetStudyDashboard(ctx context.Context, userID int64, ca
 		meetingLink := ""
 		if s.Subject != nil && s.Subject.MeetingLink != "" {
 			meetingLink = s.Subject.MeetingLink
-		} else if s.Course != nil && s.Teacher != nil && len(s.Course.TeacherSubjects) > 0 {
+		} else if s.Course != nil && len(s.Course.Subjects) > 0 {
+			// Smart topic matching against course subjects
+			topicLower := strings.ToLower(s.TopicName)
+			var matchedSubLink string
+			var matchedSubName string
+
+			for _, sub := range s.Course.Subjects {
+				subNameLower := strings.ToLower(sub.SubjectName)
+				if subNameLower != "" && (strings.Contains(topicLower, subNameLower) || strings.Contains(subNameLower, topicLower)) {
+					if sub.MeetingLink != "" {
+						matchedSubLink = sub.MeetingLink
+						matchedSubName = sub.SubjectName
+						break
+					}
+				}
+			}
+
+			if matchedSubLink == "" {
+				if strings.Contains(topicLower, "machine learning") || strings.Contains(topicLower, " ml ") || strings.HasPrefix(topicLower, "ml ") || strings.HasSuffix(topicLower, " ml") || topicLower == "ml" {
+					for _, sub := range s.Course.Subjects {
+						subNameLower := strings.ToLower(sub.SubjectName)
+						if subNameLower == "ml" || strings.Contains(subNameLower, "machine learning") {
+							if sub.MeetingLink != "" {
+								matchedSubLink = sub.MeetingLink
+								matchedSubName = sub.SubjectName
+								break
+							}
+						}
+					}
+				} else if strings.Contains(topicLower, "artificial intelligence") || strings.Contains(topicLower, " ai ") || strings.HasPrefix(topicLower, "ai ") || strings.HasSuffix(topicLower, " ai") || topicLower == "ai" {
+					for _, sub := range s.Course.Subjects {
+						subNameLower := strings.ToLower(sub.SubjectName)
+						if subNameLower == "ai" || strings.Contains(subNameLower, "artificial intelligence") {
+							if sub.MeetingLink != "" {
+								matchedSubLink = sub.MeetingLink
+								matchedSubName = sub.SubjectName
+								break
+							}
+						}
+					}
+				}
+			}
+
+			if matchedSubLink != "" {
+				meetingLink = matchedSubLink
+				if subjectName == "" && matchedSubName != "" {
+					subjectName = matchedSubName
+				}
+			}
+		}
+
+		if meetingLink == "" && s.Course != nil && s.Teacher != nil && len(s.Course.TeacherSubjects) > 0 {
 			var teacherSubjects map[string][]int64
 			if err := json.Unmarshal(s.Course.TeacherSubjects, &teacherSubjects); err == nil {
 				teacherIDStr := fmt.Sprintf("%d", s.TeacherID)
@@ -518,14 +580,15 @@ func (u *profileUsecase) GetStudyDashboard(ctx context.Context, userID int64, ca
 			}
 		}
 		if meetingLink == "" && s.Course != nil {
-			for _, sub := range s.Course.Subjects {
-				if sub.MeetingLink != "" {
-					meetingLink = sub.MeetingLink
-					break
-				}
-			}
-			if meetingLink == "" {
+			if s.Course.MeetingLink != "" {
 				meetingLink = s.Course.MeetingLink
+			} else {
+				for _, sub := range s.Course.Subjects {
+					if sub.MeetingLink != "" {
+						meetingLink = sub.MeetingLink
+						break
+					}
+				}
 			}
 		}
 
