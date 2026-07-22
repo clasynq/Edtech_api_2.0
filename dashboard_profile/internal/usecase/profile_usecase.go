@@ -433,7 +433,7 @@ func (u *profileUsecase) GetStudyDashboard(ctx context.Context, userID int64, ca
 			"courseName":  c.CourseName,
 			"batchId":     c.BatchID,
 			"bannerUrl":   c.BannerURL,
-			"meetingLink": c.MeetingLink,
+			"meetingLink": ensureAbsoluteURL(c.MeetingLink),
 			"teacherName": teacherName,
 			"category":    c.Category,
 		}
@@ -611,7 +611,7 @@ func (u *profileUsecase) GetStudyDashboard(ctx context.Context, userID int64, ca
 			"status":           s.ClassStatus,
 			"courseName":       courseName,
 			"subjectName":      subjectName,
-			"meetingLink":      meetingLink,
+			"meetingLink":      ensureAbsoluteURL(meetingLink),
 			"teacherName":      teacherName,
 			"batchId":          s.BatchID,
 			"classNotesUrl":    s.ClassNotesURL,
@@ -771,4 +771,15 @@ func formatTimeStr(tStr domain.TimeStr) string {
 		}
 	}
 	return t.Format("03:04 PM")
+}
+
+func ensureAbsoluteURL(urlStr string) string {
+	if urlStr == "" {
+		return ""
+	}
+	trimmed := strings.TrimSpace(urlStr)
+	if !strings.HasPrefix(trimmed, "http://") && !strings.HasPrefix(trimmed, "https://") {
+		return "https://" + trimmed
+	}
+	return trimmed
 }

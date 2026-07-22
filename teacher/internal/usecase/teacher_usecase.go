@@ -231,7 +231,7 @@ func (u *teacherUsecase) GetOverview(ctx context.Context, teacherID int64, categ
 			"subjects_details": subjectDetails,
 			"student_count":    count,
 			"students":         courseStudents,
-			"meeting_link":     c.MeetingLink,
+			"meeting_link":     ensureAbsoluteURL(c.MeetingLink),
 		})
 	}
 
@@ -376,7 +376,7 @@ func (u *teacherUsecase) GetBatches(ctx context.Context, teacherID int64, catego
 			"subjects_details": subjectDetails,
 			"student_count":    count,
 			"students":         courseStudents,
-			"meeting_link":     c.MeetingLink,
+			"meeting_link":     ensureAbsoluteURL(c.MeetingLink),
 		})
 	}
 
@@ -815,10 +815,21 @@ func (u *teacherUsecase) invalidateNotesCache(ctx context.Context) {
 	}
 }
 
+func ensureAbsoluteURL(urlStr string) string {
+	if urlStr == "" {
+		return ""
+	}
+	trimmed := strings.TrimSpace(urlStr)
+	if !strings.HasPrefix(trimmed, "http://") && !strings.HasPrefix(trimmed, "https://") {
+		return "https://" + trimmed
+	}
+	return trimmed
+}
+
 // Helpers
 func (u *teacherUsecase) serializeSchedule(ctx context.Context, s domain.ClassSchedule) map[string]interface{} {
 	subjectName := "No Subject Assigned"
-	meetingLink := s.Course.MeetingLink
+	meetingLink := ensureAbsoluteURL(s.Course.MeetingLink)
 	
 	if s.SubjectID != nil {
 		sub, _ := u.repo.GetSubjectByID(ctx, *s.SubjectID)
@@ -929,7 +940,7 @@ func (u *teacherUsecase) serializeSchedule(ctx context.Context, s domain.ClassSc
 		"recorded_class_url": recordedClassURL,
 		"teacher":            s.TeacherID,
 		"teacher_name":       s.Teacher.Name,
-		"meeting_link":       meetingLink,
+		"meeting_link":       ensureAbsoluteURL(meetingLink),
 	}
 }
 
@@ -1081,7 +1092,7 @@ func (u *teacherUsecase) buildTaskSchedules(ctx context.Context, teacher *domain
 				"recorded_class_url": "",
 				"teacher":            teacher.ID,
 				"teacher_name":       teacher.Name,
-				"meeting_link":       meetingLink,
+				"meeting_link":       ensureAbsoluteURL(meetingLink),
 			})
 		}
 	}
