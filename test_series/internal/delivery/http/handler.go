@@ -604,6 +604,9 @@ func (h *httpHandler) CreateQuestion(c *gin.Context) {
 	if testIDStr == "" {
 		testIDStr = c.PostForm("testId")
 	}
+	if testIDStr == "" {
+		testIDStr = c.PostForm("test")
+	}
 	testID, err := strconv.ParseInt(testIDStr, 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "invalid test_id"})
@@ -611,7 +614,13 @@ func (h *httpHandler) CreateQuestion(c *gin.Context) {
 	}
 
 	questionType := c.PostForm("questionType")
+	if questionType == "" {
+		questionType = c.PostForm("question_type")
+	}
 	questionTextStr := c.PostForm("questionText")
+	if questionTextStr == "" {
+		questionTextStr = c.PostForm("question_text")
+	}
 	var questionText *string
 	if questionTextStr != "" {
 		questionText = &questionTextStr
@@ -630,9 +639,15 @@ func (h *httpHandler) CreateQuestion(c *gin.Context) {
 	}
 
 	negativeMarksStr := c.PostForm("negativeMarks")
+	if negativeMarksStr == "" {
+		negativeMarksStr = c.PostForm("negative_marks")
+	}
 	negativeMarks, _ := strconv.ParseFloat(negativeMarksStr, 64)
 
 	questionTimerStr := c.PostForm("questionTimer")
+	if questionTimerStr == "" {
+		questionTimerStr = c.PostForm("question_timer")
+	}
 	var questionTimer *int
 	if questionTimerStr != "" {
 		if parsed, err := strconv.Atoi(questionTimerStr); err == nil {
@@ -641,6 +656,9 @@ func (h *httpHandler) CreateQuestion(c *gin.Context) {
 	}
 
 	explanationTextStr := c.PostForm("explanationText")
+	if explanationTextStr == "" {
+		explanationTextStr = c.PostForm("explanation_text")
+	}
 	var explanationText *string
 	if explanationTextStr != "" {
 		explanationText = &explanationTextStr
