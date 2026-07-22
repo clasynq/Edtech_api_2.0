@@ -221,7 +221,11 @@ func (u *testSeriesUsecase) CreateTest(ctx context.Context, test *domain.Test) e
 	}
 
 	test.CreatedAt = time.Now()
-	return u.repo.CreateTest(ctx, test)
+	if err := u.repo.CreateTest(ctx, test); err != nil {
+		return err
+	}
+	u.invalidateTestSeriesCache(ctx)
+	return nil
 }
 
 func (u *testSeriesUsecase) AddQuestion(ctx context.Context, q *domain.Question, options []domain.QuestionOption) error {
@@ -338,11 +342,19 @@ func (u *testSeriesUsecase) UpdateTest(ctx context.Context, id int64, test *doma
 	existing.Instructions = test.Instructions
 	existing.IsPublished = test.IsPublished
 
-	return u.repo.UpdateTest(ctx, existing)
+	if err := u.repo.UpdateTest(ctx, existing); err != nil {
+		return err
+	}
+	u.invalidateTestSeriesCache(ctx)
+	return nil
 }
 
 func (u *testSeriesUsecase) DeleteTest(ctx context.Context, id int64) error {
-	return u.repo.DeleteTest(ctx, id)
+	if err := u.repo.DeleteTest(ctx, id); err != nil {
+		return err
+	}
+	u.invalidateTestSeriesCache(ctx)
+	return nil
 }
 
 func (u *testSeriesUsecase) CreateQuestion(ctx context.Context, q *domain.Question, options []domain.QuestionOption) error {

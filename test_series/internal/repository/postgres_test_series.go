@@ -184,10 +184,6 @@ func (r *postgresTestSeriesRepository) UpdateTest(ctx context.Context, test *dom
 
 func (r *postgresTestSeriesRepository) DeleteTest(ctx context.Context, id int64) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// 0. Nullify test_id in class_schedules referencing this test
-		if err := tx.Exec("UPDATE class_schedules SET test_id = NULL WHERE test_id = ?", id).Error; err != nil {
-			return err
-		}
 
 		// 1. Get all questions under this test
 		var questionIDs []int64
@@ -266,10 +262,6 @@ func (r *postgresTestSeriesRepository) DeleteTestSeries(ctx context.Context, id 
 		}
 
 		if len(testIDs) > 0 {
-			// 1.5. Nullify test_id in class_schedules referencing these tests
-			if err := tx.Exec("UPDATE class_schedules SET test_id = NULL WHERE test_id IN ?", testIDs).Error; err != nil {
-				return err
-			}
 			// 2. Get all questions under these tests
 			var questionIDs []int64
 			if err := tx.Table("questions").Where("test_id IN ?", testIDs).Pluck("id", &questionIDs).Error; err != nil {
