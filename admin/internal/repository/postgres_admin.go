@@ -733,6 +733,13 @@ func (r *postgresAdminRepository) UpsertClassSchedule(ctx context.Context, sched
 	return err
 }
 
+// GetClassSchedulesByTeacher retrieves all schedules associated with a specific teacher.
+func (r *postgresAdminRepository) GetClassSchedulesByTeacher(ctx context.Context, teacherID int64) ([]*domain.ClassSchedule, error) {
+	var list []*domain.ClassSchedule
+	err := r.db.WithContext(ctx).Where("teacher_id = ?", teacherID).Find(&list).Error
+	return list, err
+}
+
 // GetSiteStatus retrieves (or builds) the site status overview metrics record (ID: 1).
 func (r *postgresAdminRepository) GetSiteStatus(ctx context.Context) (*domain.SiteStatus, error) {
 	var status domain.SiteStatus

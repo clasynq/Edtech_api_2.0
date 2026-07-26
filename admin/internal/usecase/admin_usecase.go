@@ -316,28 +316,15 @@ func (u *adminUsecase) syncTeacherTasksSchedules(ctx context.Context, teacher *d
 		_ = json.Unmarshal(raw, &newTasksSlice)
 	}
 
-	// 1. Build signatures of old schedules: "batch|task|date|time"
-	oldSignatures := make(map[string]bool)
-	for _, t := range oldTasks {
-		batch := getStringField(t, "batch")
-		taskName := getStringField(t, "task")
-		schedules, _ := t["schedules"].([]interface{})
-		for _, s := range schedules {
-			schedMap, ok := s.(map[string]interface{})
-			if ok {
-				date := getStringField(schedMap, "date")
-				timeStr := getStringField(schedMap, "time")
-				sig := fmt.Sprintf("%s|%s|%s|%s", batch, taskName, date, timeStr)
-				oldSignatures[sig] = true
-			}
-		}
-	}
-
-	// 2. Build signatures of new schedules
+	// 1. Build signatures, dates, and topics of new schedules
 	newSignatures := make(map[string]bool)
+	newDates := make(map[string]bool)
+	newTopics := make(map[string]bool)
 	for _, t := range newTasksSlice {
 		batch := getStringField(t, "batch")
 		taskName := getStringField(t, "task")
+		newTopics[strings.ToLower(taskName)] = true
+
 		schedules, _ := t["schedules"].([]interface{})
 		for _, s := range schedules {
 			schedMap, ok := s.(map[string]interface{})
@@ -346,23 +333,27 @@ func (u *adminUsecase) syncTeacherTasksSchedules(ctx context.Context, teacher *d
 				timeStr := getStringField(schedMap, "time")
 				sig := fmt.Sprintf("%s|%s|%s|%s", batch, taskName, date, timeStr)
 				newSignatures[sig] = true
+				newDates[date] = true
 			}
 		}
 	}
 
-	// 3. Delete old schedules that are missing in the new list
-	for sig := range oldSignatures {
-		if !newSignatures[sig] {
-			parts := strings.Split(sig, "|")
-			if len(parts) == 4 {
-				batch := parts[0]
-				topic := parts[1]
-				dateStr := parts[2]
-				timeStr := parts[3]
-
-				parsedDate, err := time.Parse("2006-01-02", dateStr)
-				if err == nil {
-					_ = u.repo.DeleteClassSchedulesBySignature(ctx, teacher.ID, batch, topic, parsedDate, timeStr)
+	// 2. Fetch actual database schedules for this teacher to determine diffs
+	dbSchedules, err := u.repo.GetClassSchedulesByTeacher(ctx, teacher.ID)
+	if err == nil {
+		// Delete database schedules that match task dates & topics but are missing in the new signatures
+		for _, s := range dbSchedules {
+			dateStr := s.ClassDate.Format("2006-01-02")
+			topicLower := strings.ToLower(s.TopicName)
+			
+			if newDates[dateStr] && newTopics[topicLower] {
+				startTimeClean := s.StartTime
+				if len(startTimeClean) > 5 {
+					startTimeClean = startTimeClean[:5]
+				}
+				sig := fmt.Sprintf("%s|%s|%s|%s", s.BatchID, s.TopicName, dateStr, startTimeClean)
+				if !newSignatures[sig] {
+					_ = u.repo.DeleteClassSchedulesBySignature(ctx, teacher.ID, s.BatchID, s.TopicName, s.ClassDate, startTimeClean)
 				}
 			}
 		}
