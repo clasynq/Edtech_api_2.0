@@ -606,31 +606,92 @@ func (r *postgresAdminRepository) DeleteClassSchedulesBySignature(ctx context.Co
 	if len(formattedTime) == 5 {
 		formattedTime = formattedTime + ":00"
 	}
+	dateStr := date.Format("2006-01-02")
 	return r.db.WithContext(ctx).
 		Where("teacher_id = ? AND batch_id = ? AND LOWER(topic_name) = ? AND class_date = ? AND start_time::text LIKE ?", 
-			teacherID, batchID, strings.ToLower(topic), date, formattedTime+"%").
+			teacherID, batchID, strings.ToLower(topic), dateStr, formattedTime+"%").
 		Delete(&domain.ClassSchedule{}).Error
 }
 
 // UpsertClassSchedule creates or updates a lecture schedule based on teacher, course, date and time parameters.
 func (r *postgresAdminRepository) UpsertClassSchedule(ctx context.Context, schedule *domain.ClassSchedule, topic string, subjectObj *domain.Subject) error {
 	var existing domain.ClassSchedule
+	dateStr := schedule.ClassDate.Format("2006-01-02")
+	formattedTime := schedule.StartTime
+	if len(formattedTime) == 5 {
+		formattedTime = formattedTime + ":00"
+	}
+
+	var matchedSubjectID *int64
+	if subjectObj != nil {
+		idVal := subjectObj.ID
+		matchedSubjectID = &idVal
+	} else {
+		// Resolve Subject ID from course subjects by matching against topic name
+		var subjects []domain.Subject
+		errSub := r.db.WithContext(ctx).Table("subjects").
+			Joins("JOIN courses_subjects ON courses_subjects.subject_id = subjects.id").
+			Where("courses_subjects.course_id = ?", schedule.CourseID).
+			Find(&subjects).Error
+			
+		if errSub == nil && len(subjects) > 0 {
+			topicLower := strings.ToLower(topic)
+			for _, sub := range subjects {
+				subLower := strings.ToLower(sub.SubjectName)
+				if subLower != "" && (strings.Contains(topicLower, subLower) || strings.Contains(subLower, topicLower)) {
+					idVal := sub.ID
+					matchedSubjectID = &idVal
+					break
+				}
+			}
+			
+			if matchedSubjectID == nil {
+				// Check ML/AI acronyms
+				if strings.Contains(topicLower, "machine learning") || strings.Contains(topicLower, " ml ") || strings.HasPrefix(topicLower, "ml ") || strings.HasSuffix(topicLower, " ml") || topicLower == "ml" {
+					for _, sub := range subjects {
+						subNameLower := strings.ToLower(sub.SubjectName)
+						if subNameLower == "ml" || strings.Contains(subNameLower, "machine learning") {
+							idVal := sub.ID
+							matchedSubjectID = &idVal
+							break
+						}
+					}
+				} else if strings.Contains(topicLower, "artificial intelligence") || strings.Contains(topicLower, " ai ") || strings.HasPrefix(topicLower, "ai ") || strings.HasSuffix(topicLower, " ai") || topicLower == "ai" {
+					for _, sub := range subjects {
+						subNameLower := strings.ToLower(sub.SubjectName)
+						if subNameLower == "ai" || strings.Contains(subNameLower, "artificial intelligence") {
+							idVal := sub.ID
+							matchedSubjectID = &idVal
+							break
+						}
+					}
+				}
+			}
+			
+			if matchedSubjectID == nil {
+				// Fallback to first subject
+				idVal := subjects[0].ID
+				matchedSubjectID = &idVal
+			}
+		}
+	}
+
 	err := r.db.WithContext(ctx).
 		Where("teacher_id = ? AND course_id = ? AND class_date = ? AND start_time = ?", 
-			schedule.TeacherID, schedule.CourseID, schedule.ClassDate, schedule.StartTime).
+			schedule.TeacherID, schedule.CourseID, dateStr, formattedTime).
 		First(&existing).Error
 	if err == nil {
 		// Update existing record details.
 		existing.TopicName = topic
 		existing.BatchID = schedule.BatchID
-		if subjectObj != nil {
-			existing.SubjectID = &subjectObj.ID
+		if matchedSubjectID != nil {
+			existing.SubjectID = matchedSubjectID
 		}
 		return r.db.WithContext(ctx).Save(&existing).Error
 	} else if errors.Is(err, gorm.ErrRecordNotFound) {
 		// Create new schedule record.
-		if subjectObj != nil {
-			schedule.SubjectID = &subjectObj.ID
+		if matchedSubjectID != nil {
+			schedule.SubjectID = matchedSubjectID
 		}
 		return r.db.WithContext(ctx).Create(schedule).Error
 	}

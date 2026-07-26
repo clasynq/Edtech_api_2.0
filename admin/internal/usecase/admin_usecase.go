@@ -914,6 +914,7 @@ func (u *adminUsecase) invalidateTeacherCache(ctx context.Context, teacherID int
 	patterns := []string{
 		fmt.Sprintf("teacher_overview_%d*", teacherID),
 		fmt.Sprintf("teacher_batches_%d*", teacherID),
+		fmt.Sprintf("teacher_classes_%d*", teacherID),
 	}
 	for _, pattern := range patterns {
 		var cursor uint64
