@@ -425,9 +425,8 @@ func (u *adminUsecase) syncTeacherTasksSchedules(ctx context.Context, teacher *d
 					TopicName:   topic,
 				}
 
-				var subjectObj *domain.Subject
 				// Update database
-				_ = u.repo.UpsertClassSchedule(ctx, schedule, topic, subjectObj)
+				_ = u.repo.UpsertClassSchedule(ctx, schedule, topic, courseName)
 			}
 		}
 	}

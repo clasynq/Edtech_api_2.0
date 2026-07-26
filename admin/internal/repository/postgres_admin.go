@@ -614,7 +614,7 @@ func (r *postgresAdminRepository) DeleteClassSchedulesBySignature(ctx context.Co
 }
 
 // UpsertClassSchedule creates or updates a lecture schedule based on teacher, course, date and time parameters.
-func (r *postgresAdminRepository) UpsertClassSchedule(ctx context.Context, schedule *domain.ClassSchedule, topic string, subjectObj *domain.Subject) error {
+func (r *postgresAdminRepository) UpsertClassSchedule(ctx context.Context, schedule *domain.ClassSchedule, topic string, subjectName string) error {
 	var existing domain.ClassSchedule
 	dateStr := schedule.ClassDate.Format("2006-01-02")
 	formattedTime := schedule.StartTime
@@ -623,18 +623,53 @@ func (r *postgresAdminRepository) UpsertClassSchedule(ctx context.Context, sched
 	}
 
 	var matchedSubjectID *int64
-	if subjectObj != nil {
-		idVal := subjectObj.ID
-		matchedSubjectID = &idVal
-	} else {
-		// Resolve Subject ID from course subjects by matching against topic name
-		var subjects []domain.Subject
-		errSub := r.db.WithContext(ctx).Table("subjects").
-			Joins("JOIN courses_subjects ON courses_subjects.subject_id = subjects.id").
-			Where("courses_subjects.course_id = ?", schedule.CourseID).
-			Find(&subjects).Error
+	
+	// Resolve Subject ID from course subjects
+	var subjects []domain.Subject
+	errSub := r.db.WithContext(ctx).Table("subjects").
+		Joins("JOIN courses_subjects ON courses_subjects.subject_id = subjects.id").
+		Where("courses_subjects.course_id = ?", schedule.CourseID).
+		Find(&subjects).Error
+		
+	if errSub == nil && len(subjects) > 0 {
+		// 1. Try to match against the explicitly assigned subjectName (which is courseName in tasks)
+		if subjectName != "" {
+			targetLower := strings.ToLower(subjectName)
+			for _, sub := range subjects {
+				subLower := strings.ToLower(sub.SubjectName)
+				if subLower != "" && (subLower == targetLower || strings.Contains(subLower, targetLower) || strings.Contains(targetLower, subLower)) {
+					idVal := sub.ID
+					matchedSubjectID = &idVal
+					break
+				}
+			}
 			
-		if errSub == nil && len(subjects) > 0 {
+			// Acronym check for subjectName
+			if matchedSubjectID == nil {
+				if targetLower == "ml" || strings.Contains(targetLower, "machine learning") {
+					for _, sub := range subjects {
+						subNameLower := strings.ToLower(sub.SubjectName)
+						if subNameLower == "ml" || strings.Contains(subNameLower, "machine learning") {
+							idVal := sub.ID
+							matchedSubjectID = &idVal
+							break
+						}
+					}
+				} else if targetLower == "ai" || strings.Contains(targetLower, "artificial intelligence") {
+					for _, sub := range subjects {
+						subNameLower := strings.ToLower(sub.SubjectName)
+						if subNameLower == "ai" || strings.Contains(subNameLower, "artificial intelligence") {
+							idVal := sub.ID
+							matchedSubjectID = &idVal
+							break
+						}
+					}
+				}
+			}
+		}
+
+		// 2. If no match yet, try to match against the topic name
+		if matchedSubjectID == nil {
 			topicLower := strings.ToLower(topic)
 			for _, sub := range subjects {
 				subLower := strings.ToLower(sub.SubjectName)
@@ -645,8 +680,8 @@ func (r *postgresAdminRepository) UpsertClassSchedule(ctx context.Context, sched
 				}
 			}
 			
+			// Acronym check for topic name
 			if matchedSubjectID == nil {
-				// Check ML/AI acronyms
 				if strings.Contains(topicLower, "machine learning") || strings.Contains(topicLower, " ml ") || strings.HasPrefix(topicLower, "ml ") || strings.HasSuffix(topicLower, " ml") || topicLower == "ml" {
 					for _, sub := range subjects {
 						subNameLower := strings.ToLower(sub.SubjectName)
@@ -667,12 +702,12 @@ func (r *postgresAdminRepository) UpsertClassSchedule(ctx context.Context, sched
 					}
 				}
 			}
-			
-			if matchedSubjectID == nil {
-				// Fallback to first subject
-				idVal := subjects[0].ID
-				matchedSubjectID = &idVal
-			}
+		}
+
+		// 3. Fallback to the first subject of the course
+		if matchedSubjectID == nil {
+			idVal := subjects[0].ID
+			matchedSubjectID = &idVal
 		}
 	}
 

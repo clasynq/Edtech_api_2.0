@@ -339,7 +339,7 @@ type AdminRepository interface {
 
 	// Schedules for teacher tasks
 	DeleteClassSchedulesBySignature(ctx context.Context, teacherID int64, batchID, topic string, date time.Time, startTime string) error
-	UpsertClassSchedule(ctx context.Context, schedule *ClassSchedule, topic string, subjectObj *Subject) error
+	UpsertClassSchedule(ctx context.Context, schedule *ClassSchedule, topic string, subjectName string) error
 
 	// Platform Stats
 	GetSiteStatus(ctx context.Context) (*SiteStatus, error)
