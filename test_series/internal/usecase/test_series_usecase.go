@@ -155,7 +155,7 @@ func (u *testSeriesUsecase) populateTestSeriesVirtualFields(ctx context.Context,
 				attempt, err := u.repo.GetStudentAttemptForTest(ctx, student.ID, test.ID)
 				if err == nil && attempt != nil {
 					var score *float64
-					if attempt.Status == "completed" {
+					if attempt.Status == "completed" || attempt.Status == "submitted" {
 						s := attempt.Score
 						score = &s
 					}

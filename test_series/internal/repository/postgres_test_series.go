@@ -333,14 +333,14 @@ func (r *postgresTestSeriesRepository) GetQuestionsCountByTestID(ctx context.Con
 
 func (r *postgresTestSeriesRepository) GetStudentAttemptForTest(ctx context.Context, studentID, testID int64) (*domain.StudentTestAttempt, error) {
 	var attempt domain.StudentTestAttempt
-	// Check completed attempt first
-	if err := r.db.WithContext(ctx).Where("student_id = ? AND test_id = ? AND status = 'completed'", studentID, testID).First(&attempt).Error; err == nil {
+	// Check completed/submitted attempt first
+	if err := r.db.WithContext(ctx).Where("student_id = ? AND test_id = ? AND status IN ('completed', 'submitted')", studentID, testID).First(&attempt).Error; err == nil {
 		return &attempt, nil
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
 	// Check started/ongoing attempt next
-	if err := r.db.WithContext(ctx).Where("student_id = ? AND test_id = ? AND status = 'started'", studentID, testID).First(&attempt).Error; err == nil {
+	if err := r.db.WithContext(ctx).Where("student_id = ? AND test_id = ? AND status IN ('started', 'ongoing')", studentID, testID).First(&attempt).Error; err == nil {
 		return &attempt, nil
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
