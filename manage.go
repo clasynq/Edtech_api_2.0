@@ -1054,32 +1054,4 @@ func main() {
 		}
 	}
 	fmt.Println("[Migrate] GORM AutoMigrate completed successfully for all services.")
-
-	// Clean up duplicate pending schedules and create a unique index for active slots
-	db = connectDB(dbURL)
-	cleanupSQL := `
-		-- 1. Delete duplicate active class schedules, keeping the oldest one (lowest ID)
-		DELETE FROM class_schedules a
-		USING class_schedules b
-		WHERE a.id > b.id
-		  AND a.teacher_id = b.teacher_id
-		  AND a.course_id = b.course_id
-		  AND a.class_date = b.class_date
-		  AND a.start_time = b.start_time
-		  AND a.class_status != 'cancelled'
-		  AND b.class_status != 'cancelled';
-
-		-- 2. Create a unique index to prevent duplicate active class schedules from being created
-		CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_active_schedule 
-		ON class_schedules (teacher_id, course_id, class_date, start_time) 
-		WHERE class_status != 'cancelled';
-	`
-	if err := db.Exec(cleanupSQL).Error; err != nil {
-		log.Printf("[Migrate] Warning: Failed to run class schedules database cleanup: %v", err)
-	} else {
-		fmt.Println("[Migrate] Successfully cleaned up duplicate class schedules and created active schedule unique index.")
-	}
-	if sqlDB, err := db.DB(); err == nil {
-		sqlDB.Close()
-	}
 }

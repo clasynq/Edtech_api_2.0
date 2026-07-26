@@ -327,7 +327,42 @@ func (u *courseUsecase) UpdateSubjectMeetingLink(ctx context.Context, id int64, 
 }
 
 func (u *courseUsecase) ListSchedules(ctx context.Context, filters map[string]string) ([]domain.ClassSchedule, error) {
-	return u.repo.ListSchedules(ctx, filters)
+	schedules, err := u.repo.ListSchedules(ctx, filters)
+	if err != nil {
+		return nil, err
+	}
+
+	// Deduplicate class schedules programmatically by teacher, course, date and start time
+	seen := make(map[string]int) // maps signature -> index in deduplicated slice
+	var deduplicated []domain.ClassSchedule
+
+	for _, s := range schedules {
+		startTimeClean := string(s.StartTime)
+		if len(startTimeClean) > 5 {
+			startTimeClean = startTimeClean[:5]
+		}
+		
+		sig := fmt.Sprintf("%d|%d|%s|%s", s.TeacherID, s.CourseID, s.ClassDate.ToTime().Format("2006-01-02"), startTimeClean)
+		
+		if idx, found := seen[sig]; found {
+			// Compare status priority: Completed > Cancelled > Pending (or other statuses)
+			existing := deduplicated[idx]
+			
+			// If existing is pending, but new one is completed/cancelled, replace it!
+			if existing.ClassStatus == "pending" && (s.ClassStatus == "completed" || s.ClassStatus == "cancelled" || s.ClassStatus == "ongoing" || s.ClassStatus == "rescheduled") {
+				deduplicated[idx] = s
+			} else if existing.ClassStatus == "rescheduled" && (s.ClassStatus == "completed" || s.ClassStatus == "cancelled" || s.ClassStatus == "ongoing") {
+				deduplicated[idx] = s
+			} else if existing.ClassStatus == "cancelled" && s.ClassStatus == "completed" {
+				deduplicated[idx] = s
+			}
+		} else {
+			seen[sig] = len(deduplicated)
+			deduplicated = append(deduplicated, s)
+		}
+	}
+
+	return deduplicated, nil
 }
 
 func (u *courseUsecase) CreateSchedule(ctx context.Context, schedule *domain.ClassSchedule) error {
