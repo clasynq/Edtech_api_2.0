@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"encoding/json"
 	"github.com/joho/godotenv"
 	"golang.org/x/crypto/pbkdf2"
 	"golang.org/x/term"
@@ -1054,4 +1055,97 @@ func main() {
 		}
 	}
 	fmt.Println("[Migrate] GORM AutoMigrate completed successfully for all services.")
+
+	// Run automatic cleanup of orphan/mismatched duplicate database schedules
+	db = connectDB(dbURL)
+	cleanOrphanSchedules(db)
+	if sqlDB, err := db.DB(); err == nil {
+		sqlDB.Close()
+	}
+}
+
+// cleanOrphanSchedules inspects teacher tasks JSONs and cleans up mismatching/obsolete active database class schedules.
+func cleanOrphanSchedules(db *gorm.DB) {
+	fmt.Println("[Migrate] Running database cleanup for orphan/incorrect class schedules...")
+	
+	type TempTeacher struct {
+		ID    int64
+		Tasks string
+	}
+	
+	type TempSchedule struct {
+		ID        int64
+		TeacherID int64
+		BatchID   string
+		TopicName string
+		ClassDate time.Time
+		StartTime string
+	}
+	
+	var teachers []TempTeacher
+	if err := db.Table("teachers").Select("id, tasks").Find(&teachers).Error; err != nil {
+		log.Printf("[Migrate] Failed to query teachers: %v", err)
+		return
+	}
+	
+	deletedCount := 0
+	for _, t := range teachers {
+		if t.Tasks == "" || t.Tasks == "[]" {
+			continue
+		}
+		
+		var tasks []map[string]interface{}
+		if err := json.Unmarshal([]byte(t.Tasks), &tasks); err != nil {
+			continue
+		}
+		
+		newSignatures := make(map[string]bool)
+		newTopics := make(map[string]bool)
+		
+		for _, task := range tasks {
+			batch, _ := task["batch"].(string)
+			taskName, _ := task["task"].(string)
+			if taskName != "" {
+				newTopics[strings.ToLower(taskName)] = true
+			}
+			
+			schedules, _ := task["schedules"].([]interface{})
+			for _, s := range schedules {
+				schedMap, ok := s.(map[string]interface{})
+				if ok {
+					date, _ := schedMap["date"].(string)
+					timeStr, _ := schedMap["time"].(string)
+					sig := fmt.Sprintf("%s|%s|%s|%s", batch, taskName, date, timeStr)
+					newSignatures[sig] = true
+				}
+			}
+		}
+		
+		var dbSchedules []TempSchedule
+		if err := db.Table("class_schedules").
+			Where("teacher_id = ? AND class_status != 'cancelled'", t.ID).
+			Select("id, teacher_id, batch_id, topic_name, class_date, start_time").
+			Find(&dbSchedules).Error; err != nil {
+			continue
+		}
+		
+		for _, s := range dbSchedules {
+			topicLower := strings.ToLower(s.TopicName)
+			if newTopics[topicLower] {
+				dateStr := s.ClassDate.Format("2006-01-02")
+				startTimeClean := s.StartTime
+				if len(startTimeClean) > 5 {
+					startTimeClean = startTimeClean[:5]
+				}
+				sig := fmt.Sprintf("%s|%s|%s|%s", s.BatchID, s.TopicName, dateStr, startTimeClean)
+				if !newSignatures[sig] {
+					fmt.Printf("[Migrate] Deleting obsolete schedule ID %d (sig: %s)\n", s.ID, sig)
+					if err := db.Table("class_schedules").Delete(&TempSchedule{ID: s.ID}).Error; err == nil {
+						deletedCount++
+					}
+				}
+			}
+		}
+	}
+	fmt.Printf("[Migrate] Database cleanup completed. Deleted %d obsolete schedule records.\n", deletedCount)
 }

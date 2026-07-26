@@ -346,7 +346,7 @@ func (u *adminUsecase) syncTeacherTasksSchedules(ctx context.Context, teacher *d
 			dateStr := s.ClassDate.Format("2006-01-02")
 			topicLower := strings.ToLower(s.TopicName)
 			
-			if newDates[dateStr] && newTopics[topicLower] {
+			if newTopics[topicLower] {
 				startTimeClean := s.StartTime
 				if len(startTimeClean) > 5 {
 					startTimeClean = startTimeClean[:5]
