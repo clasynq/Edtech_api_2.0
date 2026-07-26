@@ -1117,18 +1117,32 @@ func (u *teacherUsecase) sortSchedules(schedules []map[string]interface{}) {
 }
 
 func (u *teacherUsecase) deduplicateSchedules(schedules []map[string]interface{}) []map[string]interface{} {
-	seen := make(map[string]bool)
+	seen := make(map[string]int) // maps signature -> index in deduplicated
 	var deduplicated []map[string]interface{}
 	for _, s := range schedules {
-		batchID := u.getString(s["batch_id"])
 		classDate := u.getString(s["class_date"])
 		startTime := u.getString(s["start_time"])
 		if len(startTime) > 5 {
 			startTime = startTime[:5]
 		}
-		sig := strings.ToLower(batchID) + "|" + classDate + "|" + startTime
-		if !seen[sig] {
-			seen[sig] = true
+		sig := classDate + "|" + startTime
+		
+		if idx, found := seen[sig]; found {
+			existing := deduplicated[idx]
+			existingBatch := u.getString(existing["batch_id"])
+			newBatch := u.getString(s["batch_id"])
+			if existingBatch != "" && newBatch != "" && !strings.Contains(existingBatch, newBatch) {
+				existing["batch_id"] = existingBatch + " / " + newBatch
+				
+				existingCourse := u.getString(existing["courseName"])
+				newCourse := u.getString(s["courseName"])
+				if existingCourse != "" && newCourse != "" && !strings.Contains(existingCourse, newCourse) {
+					existing["courseName"] = existingCourse + " / " + newCourse
+				}
+				deduplicated[idx] = existing
+			}
+		} else {
+			seen[sig] = len(deduplicated)
 			deduplicated = append(deduplicated, s)
 		}
 	}

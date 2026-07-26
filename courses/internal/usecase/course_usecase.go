@@ -9,6 +9,7 @@ import (
 	"math"
 	"math/big"
 	"strconv"
+	"strings"
 	"time"
 
 	"clasynq/api/courses/internal/domain"
@@ -332,7 +333,7 @@ func (u *courseUsecase) ListSchedules(ctx context.Context, filters map[string]st
 		return nil, err
 	}
 
-	// Deduplicate class schedules programmatically by teacher, course, date and start time
+	// Deduplicate class schedules programmatically by teacher, date and start time
 	seen := make(map[string]int) // maps signature -> index in deduplicated slice
 	var deduplicated []domain.ClassSchedule
 
@@ -342,19 +343,34 @@ func (u *courseUsecase) ListSchedules(ctx context.Context, filters map[string]st
 			startTimeClean = startTimeClean[:5]
 		}
 		
-		sig := fmt.Sprintf("%d|%d|%s|%s", s.TeacherID, s.CourseID, s.ClassDate.ToTime().Format("2006-01-02"), startTimeClean)
+		sig := fmt.Sprintf("%d|%s|%s", s.TeacherID, s.ClassDate.ToTime().Format("2006-01-02"), startTimeClean)
 		
 		if idx, found := seen[sig]; found {
-			// Compare status priority: Completed > Cancelled > Pending (or other statuses)
 			existing := deduplicated[idx]
 			
-			// If existing is pending, but new one is completed/cancelled, replace it!
+			// Combine batch IDs and course names if they differ
+			if existing.BatchID != "" && s.BatchID != "" && !strings.Contains(existing.BatchID, s.BatchID) {
+				existing.BatchID = existing.BatchID + " / " + s.BatchID
+			}
+			if existing.CourseName != "" && s.CourseName != "" && !strings.Contains(existing.CourseName, s.CourseName) {
+				existing.CourseName = existing.CourseName + " / " + s.CourseName
+			}
+			
+			// Compare status priority: Completed > Cancelled > Pending (or other statuses)
 			if existing.ClassStatus == "pending" && (s.ClassStatus == "completed" || s.ClassStatus == "cancelled" || s.ClassStatus == "ongoing" || s.ClassStatus == "rescheduled") {
+				s.BatchID = existing.BatchID
+				s.CourseName = existing.CourseName
 				deduplicated[idx] = s
 			} else if existing.ClassStatus == "rescheduled" && (s.ClassStatus == "completed" || s.ClassStatus == "cancelled" || s.ClassStatus == "ongoing") {
+				s.BatchID = existing.BatchID
+				s.CourseName = existing.CourseName
 				deduplicated[idx] = s
 			} else if existing.ClassStatus == "cancelled" && s.ClassStatus == "completed" {
+				s.BatchID = existing.BatchID
+				s.CourseName = existing.CourseName
 				deduplicated[idx] = s
+			} else {
+				deduplicated[idx] = existing
 			}
 		} else {
 			seen[sig] = len(deduplicated)
