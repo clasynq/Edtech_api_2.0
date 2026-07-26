@@ -375,9 +375,6 @@ func (u *adminUsecase) syncTeacherTasksSchedules(ctx context.Context, teacher *d
 		courseName := getStringField(t, "course")
 
 		course, _ := u.repo.GetCourseByBatchID(ctx, batch)
-		if course == nil && courseName != "" {
-			course, _ = u.repo.GetCourseByName(ctx, courseName)
-		}
 		if course == nil {
 			continue
 		}
