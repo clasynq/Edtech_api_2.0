@@ -180,7 +180,36 @@ func (u *noteUsecase) GetClassNotes(ctx context.Context, userID int64, role stri
 		return dbNotes[i].CreatedAt.After(dbNotes[j].CreatedAt)
 	})
 
-	return dbNotes, nil
+	seenUrls := make(map[string]bool)
+	var finalNotes []domain.Note
+	for _, n := range dbNotes {
+		fileURL := strings.TrimSpace(strings.ToLower(n.FileURL))
+		if idx := strings.Index(fileURL, "/media/"); idx != -1 {
+			fileURL = fileURL[idx:]
+		}
+		recordedURL := strings.TrimSpace(strings.ToLower(n.RecordedClassURL))
+		if idx := strings.Index(recordedURL, "/media/"); idx != -1 {
+			recordedURL = recordedURL[idx:]
+		}
+
+		if fileURL != "" {
+			if seenUrls[fileURL] {
+				continue
+			}
+			seenUrls[fileURL] = true
+		}
+
+		if recordedURL != "" {
+			if seenUrls[recordedURL] {
+				continue
+			}
+			seenUrls[recordedURL] = true
+		}
+
+		finalNotes = append(finalNotes, n)
+	}
+
+	return finalNotes, nil
 }
 
 func (u *noteUsecase) GetNoteByIDOrSlug(ctx context.Context, userID int64, role string, idOrSlug string) (*domain.Note, bool, error) {
