@@ -1473,6 +1473,142 @@ func (u *teacherUsecase) UpdateTaskClass(ctx context.Context, teacherID int64, t
 		}
 	}
 
+	// Check if there is an active (non-cancelled) schedule for this teacher/course/date/time slot
+	existing, err := u.repo.GetActiveScheduleBySlot(ctx, teacherID, courseObj.ID, originalDate, originalStartTime)
+	if err == nil && existing != nil {
+		// An active schedule exists! Let's update it instead of creating a duplicate row.
+		if classStatus == "rescheduled" {
+			// Update existing schedule to cancelled
+			origReason := fmt.Sprintf("Rescheduled to %s %s: %s", updates["classDate"], updates["startTime"], updates["rescheduleReason"])
+			existing.ClassStatus = "cancelled"
+			existing.RescheduleReason = &origReason
+			if err := u.repo.UpdateClassSchedule(ctx, existing); err != nil {
+				return nil, err
+			}
+
+			// We need to parse rescheduled date/time/reason to create the new slot
+			var newDateStr string
+			if d, ok := updates["classDate"].(string); ok && d != "" {
+				newDateStr = d
+			} else if d, ok := updates["class_date"].(string); ok && d != "" {
+				newDateStr = d
+			}
+			if newDateStr == "" {
+				return nil, errors.New("reschedule date is required")
+			}
+			newDate, err := time.Parse("2006-01-02", newDateStr)
+			if err != nil {
+				return nil, errors.New("invalid reschedule date format")
+			}
+
+			var newStartTime string
+			if t, ok := updates["startTime"].(string); ok && t != "" {
+				newStartTime = t
+			} else if t, ok := updates["start_time"].(string); ok && t != "" {
+				newStartTime = t
+			}
+			if newStartTime == "" {
+				newStartTime = "10:00"
+			}
+			if len(newStartTime) == 5 {
+				newStartTime = newStartTime + ":00"
+			}
+
+			var newEndTime string
+			if t, ok := updates["endTime"].(string); ok && t != "" {
+				newEndTime = t
+			} else if t, ok := updates["end_time"].(string); ok && t != "" {
+				newEndTime = t
+			}
+			if newEndTime == "" {
+				newEndTime = newStartTime
+				tObj, err := time.Parse("15:04", newStartTime[:5])
+				if err == nil {
+					newEndTime = tObj.Add(2 * time.Hour).Format("15:04:05")
+				}
+			}
+			if len(newEndTime) == 5 {
+				newEndTime = newEndTime + ":00"
+			}
+
+			var reason string
+			if r, ok := updates["rescheduleReason"].(string); ok {
+				reason = r
+			} else if r, ok := updates["reschedule_reason"].(string); ok {
+				reason = r
+			}
+
+			// Create rescheduled active slot as PENDING in DB
+			newSched := &domain.ClassSchedule{
+				CourseID:         courseObj.ID,
+				SubjectID:        subjectID,
+				BatchID:          courseObj.BatchID,
+				TeacherID:        teacherID,
+				TopicName:        taskItem.Task,
+				ClassDate:        newDate,
+				StartTime:        newStartTime,
+				EndTime:          newEndTime,
+				ClassStatus:      "pending",
+				RescheduleReason: &reason,
+				CreatedAt:        time.Now(),
+			}
+			if err := u.repo.CreateClassSchedule(ctx, newSched); err != nil {
+				return nil, err
+			}
+
+			_ = u.repo.LogTeacherActivity(ctx, teacherID, "Rescheduled", "Class Session", fmt.Sprintf("%s to %s", taskItem.Task, newDateStr))
+			u.invalidateCache(ctx, teacherID)
+			
+			fullSched, _ := u.repo.GetClassScheduleByID(ctx, newSched.ID)
+			if fullSched != nil {
+				return u.serializeSchedule(ctx, *fullSched), nil
+			}
+			return u.serializeSchedule(ctx, *newSched), nil
+
+		} else if classStatus == "completed" {
+			existing.ClassStatus = "completed"
+			existing.ClassNotesURL = notesURL
+			existing.RecordedClassURL = recordedURL
+			existing.Description = description
+			if err := u.repo.UpdateClassSchedule(ctx, existing); err != nil {
+				return nil, err
+			}
+
+			_ = u.repo.LogTeacherActivity(ctx, teacherID, "Completed", "Class Session", taskItem.Task)
+			u.invalidateCache(ctx, teacherID)
+			u.invalidateNotesCache(ctx)
+
+			fullSched, _ := u.repo.GetClassScheduleByID(ctx, existing.ID)
+			if fullSched != nil {
+				return u.serializeSchedule(ctx, *fullSched), nil
+			}
+			return u.serializeSchedule(ctx, *existing), nil
+
+		} else if classStatus == "cancelled" {
+			var reason string
+			if r, ok := updates["rescheduleReason"].(string); ok {
+				reason = r
+			} else if r, ok := updates["reschedule_reason"].(string); ok {
+				reason = r
+			}
+
+			existing.ClassStatus = "cancelled"
+			existing.RescheduleReason = &reason
+			if err := u.repo.UpdateClassSchedule(ctx, existing); err != nil {
+				return nil, err
+			}
+
+			_ = u.repo.LogTeacherActivity(ctx, teacherID, "Cancelled", "Class Session", taskItem.Task)
+			u.invalidateCache(ctx, teacherID)
+
+			fullSched, _ := u.repo.GetClassScheduleByID(ctx, existing.ID)
+			if fullSched != nil {
+				return u.serializeSchedule(ctx, *fullSched), nil
+			}
+			return u.serializeSchedule(ctx, *existing), nil
+		}
+	}
+
 	// 6. Handle action based on status
 	if classStatus == "rescheduled" {
 		// We need to parse rescheduled date/time/reason

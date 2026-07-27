@@ -172,6 +172,26 @@ func (r *postgresTeacherRepository) UpdateClassSchedule(ctx context.Context, sch
 	return r.db.WithContext(ctx).Omit("Teacher", "Course", "Subject", "CreatedAt").Save(schedule).Error
 }
 
+func (r *postgresTeacherRepository) GetActiveScheduleBySlot(ctx context.Context, teacherID, courseID int64, classDate time.Time, startTime string) (*domain.ClassSchedule, error) {
+	var sched domain.ClassSchedule
+	formattedTime := startTime
+	if len(formattedTime) == 5 {
+		formattedTime = formattedTime + ":00"
+	}
+	
+	err := r.db.WithContext(ctx).
+		Where("teacher_id = ? AND course_id = ? AND class_date = ? AND start_time = ? AND class_status <> 'cancelled'",
+			teacherID, courseID, classDate.Format("2006-01-02"), formattedTime).
+		First(&sched).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &sched, nil
+}
+
 func (r *postgresTeacherRepository) DeleteClassSchedule(ctx context.Context, id int64) error {
 	return r.db.WithContext(ctx).Delete(&domain.ClassSchedule{}, id).Error
 }

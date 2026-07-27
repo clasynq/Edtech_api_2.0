@@ -153,6 +153,7 @@ type TeacherRepository interface {
 	GetClassScheduleByID(ctx context.Context, id int64) (*ClassSchedule, error)
 	UpdateClassSchedule(ctx context.Context, schedule *ClassSchedule) error
 	DeleteClassSchedule(ctx context.Context, id int64) error
+	GetActiveScheduleBySlot(ctx context.Context, teacherID, courseID int64, classDate time.Time, startTime string) (*ClassSchedule, error)
 	
 	// Subjects for meeting link resolution
 	GetSubjectsForCourse(ctx context.Context, courseID int64) ([]Subject, error)
