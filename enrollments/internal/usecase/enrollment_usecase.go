@@ -259,13 +259,29 @@ func (u *enrollmentUsecase) CreateOrder(ctx context.Context, buyerID int64, buye
 		redeemCoins = coinsVal.(bool)
 	}
 
+	coinsToRedeem := 0
+	if ctrVal, ok := req["coinsToRedeem"]; ok && ctrVal != nil {
+		switch v := ctrVal.(type) {
+		case float64:
+			coinsToRedeem = int(v)
+		case int:
+			coinsToRedeem = v
+		case int64:
+			coinsToRedeem = int(v)
+		}
+	}
+
+	if coinsToRedeem == 0 && redeemCoins {
+		coinsToRedeem = buyer.CoinsBalance
+	}
+
 	deviceFingerprint := ""
 	if dfVal, ok := req["deviceFingerprint"]; ok && dfVal != nil {
 		deviceFingerprint = dfVal.(string)
 	}
 
 	// Coins cannot be redeemed simultaneously with a referral code
-	if referralCode != "" && redeemCoins {
+	if referralCode != "" && (redeemCoins || coinsToRedeem > 0) {
 		return nil, errors.New("coins cannot be redeemed simultaneously with a referral code")
 	}
 
@@ -287,13 +303,13 @@ func (u *enrollmentUsecase) CreateOrder(ctx context.Context, buyerID int64, buye
 			} else {
 				return nil, fmt.Errorf("referral code validation failed: %s", res["message"].(string))
 			}
-		} else if redeemCoins && buyer.CoinsBalance > 0 {
+		} else if coinsToRedeem > 0 && buyer.CoinsBalance > 0 {
 			referralsCount, err := u.repo.CountCompletedReferralsForReferrer(ctx, buyerID)
 			if err != nil {
 				return nil, err
 			}
 
-			var maxDiscount float64 = 0
+			maxDiscount := basePrice
 			if referralsCount >= 5 && referralsCount <= 9 {
 				if basePrice < 3000 {
 					maxDiscount = 500
@@ -316,13 +332,17 @@ func (u *enrollmentUsecase) CreateOrder(ctx context.Context, buyerID int64, buye
 				}
 			}
 
-			if maxDiscount > 0 {
-				maxCoinsAllowed := int(math.Floor(maxDiscount / 120.0))
-				if maxCoinsAllowed > buyer.CoinsBalance {
-					coinsRedeemed = buyer.CoinsBalance
-				} else {
-					coinsRedeemed = maxCoinsAllowed
-				}
+			maxCoinsAllowed := int(math.Floor(maxDiscount / 120.0))
+			actualRedeem := coinsToRedeem
+			if actualRedeem > buyer.CoinsBalance {
+				actualRedeem = buyer.CoinsBalance
+			}
+			if actualRedeem > maxCoinsAllowed {
+				actualRedeem = maxCoinsAllowed
+			}
+
+			if actualRedeem > 0 {
+				coinsRedeemed = actualRedeem
 				coinDiscount := float64(coinsRedeemed) * 120.0
 				finalPrice = basePrice - coinDiscount
 				if finalPrice < 0 {
