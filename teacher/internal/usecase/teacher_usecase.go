@@ -1101,6 +1101,13 @@ func (u *teacherUsecase) buildTaskSchedules(ctx context.Context, teacher *domain
 
 
 func (u *teacherUsecase) sortSchedules(schedules []map[string]interface{}) {
+	normalize := func(tStr string) string {
+		if len(tStr) > 5 {
+			return tStr[:5]
+		}
+		return tStr
+	}
+
 	// Simple bubble sort or stable sort
 	for i := 0; i < len(schedules); i++ {
 		for j := i + 1; j < len(schedules); j++ {
@@ -1109,8 +1116,18 @@ func (u *teacherUsecase) sortSchedules(schedules []map[string]interface{}) {
 			dateJ := u.getString(schedules[j]["class_date"])
 			timeJ := u.getString(schedules[j]["start_time"])
 
-			if dateI > dateJ || (dateI == dateJ && timeI > timeJ) {
+			normI := normalize(timeI)
+			normJ := normalize(timeJ)
+
+			if dateI > dateJ || (dateI == dateJ && normI > normJ) {
 				schedules[i], schedules[j] = schedules[j], schedules[i]
+			} else if dateI == dateJ && normI == normJ {
+				// If date and normalized time are identical, prefer the one with a non-zero ID (actual database schedule over virtual task)
+				idI := u.toInt64(schedules[i]["id"])
+				idJ := u.toInt64(schedules[j]["id"])
+				if idI == 0 && idJ > 0 {
+					schedules[i], schedules[j] = schedules[j], schedules[i]
+				}
 			}
 		}
 	}

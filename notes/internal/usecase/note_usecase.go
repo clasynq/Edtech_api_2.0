@@ -183,6 +183,11 @@ func (u *noteUsecase) GetClassNotes(ctx context.Context, userID int64, role stri
 	seenUrls := make(map[string]bool)
 	var finalNotes []domain.Note
 	for _, n := range dbNotes {
+		var cid int64
+		if n.CourseID != nil {
+			cid = *n.CourseID
+		}
+
 		fileURL := strings.TrimSpace(strings.ToLower(n.FileURL))
 		if idx := strings.Index(fileURL, "/media/"); idx != -1 {
 			fileURL = fileURL[idx:]
@@ -193,17 +198,19 @@ func (u *noteUsecase) GetClassNotes(ctx context.Context, userID int64, role stri
 		}
 
 		if fileURL != "" {
-			if seenUrls[fileURL] {
+			key := fmt.Sprintf("%d|%s", cid, fileURL)
+			if seenUrls[key] {
 				continue
 			}
-			seenUrls[fileURL] = true
+			seenUrls[key] = true
 		}
 
 		if recordedURL != "" {
-			if seenUrls[recordedURL] {
+			key := fmt.Sprintf("%d|%s", cid, recordedURL)
+			if seenUrls[key] {
 				continue
 			}
-			seenUrls[recordedURL] = true
+			seenUrls[key] = true
 		}
 
 		finalNotes = append(finalNotes, n)
