@@ -127,44 +127,60 @@ func (u *noteUsecase) GetNotes(ctx context.Context, userID int64, role string, f
 }
 
 func (u *noteUsecase) GetClassNotes(ctx context.Context, userID int64, role string, filters map[string]string) ([]domain.Note, error) {
-	// If role is admin or teacher, they see class notes
+	var dbNotes []domain.Note
+	var err error
+
+	category := filters["category"]
+
 	if role == "admin" || role == "teacher" {
 		filters["noteType"] = "class"
 		if role == "teacher" {
 			filters["teacherId"] = strconv.FormatInt(userID, 10)
 		}
-		return u.GetNotes(ctx, userID, role, filters)
+		dbNotes, err = u.GetNotes(ctx, userID, role, filters)
+		if err != nil {
+			return nil, err
+		}
+
+		var schedNotes []domain.Note
+		if role == "admin" {
+			schedNotes, err = u.repo.GetClassScheduleNotes(ctx, nil, category, 0, true)
+		} else {
+			schedNotes, err = u.repo.GetClassScheduleNotes(ctx, nil, category, userID, false)
+		}
+		if err == nil {
+			dbNotes = append(dbNotes, schedNotes...)
+		}
+	} else {
+		if userID > 0 {
+			student, err := u.repo.GetStudentByUserID(ctx, userID)
+			if err == nil && student != nil {
+				courseIDs, err := u.repo.GetEnrolledCourseIDs(ctx, student.ID)
+				if err == nil && len(courseIDs) > 0 {
+					var idStrs []string
+					for _, id := range courseIDs {
+						idStrs = append(idStrs, strconv.FormatInt(id, 10))
+					}
+					filters["courseIds"] = strings.Join(idStrs, ",")
+					filters["noteType"] = "class"
+
+					dbNotes, err = u.GetNotes(ctx, userID, role, filters)
+					if err == nil {
+						schedNotes, err := u.repo.GetClassScheduleNotes(ctx, courseIDs, category, 0, false)
+						if err == nil {
+							dbNotes = append(dbNotes, schedNotes...)
+						}
+					}
+				}
+			}
+		}
 	}
 
-	// For student, they only see notes from courses they are enrolled in
-	if userID <= 0 {
-		return []domain.Note{}, nil
-	}
+	sort.Slice(dbNotes, func(i, j int) bool {
+		return dbNotes[i].CreatedAt.After(dbNotes[j].CreatedAt)
+	})
 
-	student, err := u.repo.GetStudentByUserID(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	if student == nil {
-		return []domain.Note{}, nil
-	}
-
-	courseIDs, err := u.repo.GetEnrolledCourseIDs(ctx, student.ID)
-	if err != nil {
-		return nil, err
-	}
-	if len(courseIDs) == 0 {
-		return []domain.Note{}, nil
-	}
-
-	var idStrs []string
-	for _, id := range courseIDs {
-		idStrs = append(idStrs, strconv.FormatInt(id, 10))
-	}
-	filters["courseIds"] = strings.Join(idStrs, ",")
-	filters["noteType"] = "class"
-
-	return u.GetNotes(ctx, userID, role, filters)
+	return dbNotes, nil
 }
 
 func (u *noteUsecase) GetNoteByIDOrSlug(ctx context.Context, userID int64, role string, idOrSlug string) (*domain.Note, bool, error) {

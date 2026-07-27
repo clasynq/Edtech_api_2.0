@@ -3,9 +3,11 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"clasynq/api/notes/internal/domain"
 
@@ -349,4 +351,79 @@ func (r *postgresNoteRepository) GetImportantNoteByID(ctx context.Context, id in
 		return nil, err
 	}
 	return &note, nil
+}
+
+func (r *postgresNoteRepository) GetClassScheduleNotes(ctx context.Context, enrolledCourseIDs []int64, category string, teacherID int64, isAdmin bool) ([]domain.Note, error) {
+	type ScheduleRow struct {
+		ID               int64      `gorm:"column:id"`
+		TopicName        string     `gorm:"column:topic_name"`
+		ClassDate        time.Time  `gorm:"column:class_date"`
+		CourseID         int64      `gorm:"column:course_id"`
+		CourseName       string     `gorm:"column:course_name"`
+		SubjectName      string     `gorm:"column:subject_name"`
+		BatchID          string     `gorm:"column:batch_id"`
+		ClassNotesURL    *string    `gorm:"column:class_notes_url"`
+		RecordedClassURL *string    `gorm:"column:recorded_class_url"`
+		CreatedAt        time.Time  `gorm:"column:created_at"`
+	}
+
+	var rows []ScheduleRow
+	query := r.db.WithContext(ctx).Table("class_schedules").
+		Select("class_schedules.*, courses.course_name AS course_name, subjects.subject_name AS subject_name").
+		Joins("JOIN courses ON courses.id = class_schedules.course_id").
+		Joins("LEFT JOIN subjects ON subjects.id = class_schedules.subject_id").
+		Where("class_schedules.class_status = 'completed'")
+
+	if !isAdmin {
+		if teacherID > 0 {
+			query = query.Where("class_schedules.teacher_id = ?", teacherID)
+		} else if len(enrolledCourseIDs) > 0 {
+			query = query.Where("class_schedules.course_id IN ?", enrolledCourseIDs)
+		} else {
+			return []domain.Note{}, nil
+		}
+	}
+
+	if category != "" {
+		query = query.Where("LOWER(courses.category) = ?", strings.ToLower(category))
+	}
+
+	query = query.Where("(class_schedules.class_notes_url IS NOT NULL AND class_schedules.class_notes_url <> '') OR (class_schedules.recorded_class_url IS NOT NULL AND class_schedules.recorded_class_url <> '')")
+
+	if err := query.Order("class_schedules.created_at DESC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	var notes []domain.Note
+	for _, row := range rows {
+		var notesURL string
+		if row.ClassNotesURL != nil {
+			notesURL = *row.ClassNotesURL
+		}
+		var recordedURL string
+		if row.RecordedClassURL != nil {
+			recordedURL = *row.RecordedClassURL
+		}
+
+		note := domain.Note{
+			ID:               -row.ID, // Negative ID to prevent conflicts with regular notes
+			Title:            fmt.Sprintf("%s (Class Notes)", row.TopicName),
+			Description:      fmt.Sprintf("Class session notes conducted on %s.", row.ClassDate.Format("January 02, 2006")),
+			NoteType:         "class",
+			IsFree:           true,
+			Price:            0.0,
+			BatchID:          row.BatchID,
+			FileURL:          notesURL,
+			RecordedClassURL: recordedURL,
+			CourseID:         &row.CourseID,
+			CourseName:       row.CourseName,
+			Subject:          row.SubjectName,
+			Topic:            row.TopicName,
+			IsUnlocked:       true,
+			CreatedAt:        row.CreatedAt,
+		}
+		notes = append(notes, note)
+	}
+
+	return notes, nil
 }

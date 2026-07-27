@@ -83,6 +83,7 @@ type NoteRepository interface {
 	HasNoteAccess(ctx context.Context, studentID, noteID int64) (bool, error)
 	IsStudentEnrolledInCourse(ctx context.Context, studentID, courseID int64) (bool, error)
 	GetNoteAccesses(ctx context.Context, studentID int64) ([]int64, error)
+	GetClassScheduleNotes(ctx context.Context, enrolledCourseIDs []int64, category string, teacherID int64, isAdmin bool) ([]Note, error)
 
 	// Important Notes
 	CreateImportantNote(ctx context.Context, note *ImportantNote) error

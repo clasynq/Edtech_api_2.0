@@ -609,15 +609,15 @@ func (u *teacherUsecase) UpdateClass(ctx context.Context, teacherID, classID int
 	}
 
 	if startTime, ok := updates["startTime"].(string); ok {
-		schedule.StartTime = startTime
+		schedule.StartTime = formatTime(startTime)
 	} else if startTime, ok := updates["start_time"].(string); ok {
-		schedule.StartTime = startTime
+		schedule.StartTime = formatTime(startTime)
 	}
 
 	if endTime, ok := updates["endTime"].(string); ok {
-		schedule.EndTime = endTime
+		schedule.EndTime = formatTime(endTime)
 	} else if endTime, ok := updates["end_time"].(string); ok {
-		schedule.EndTime = endTime
+		schedule.EndTime = formatTime(endTime)
 	}
 
 	if classStatus, ok := updates["classStatus"].(string); ok {
@@ -1125,7 +1125,8 @@ func (u *teacherUsecase) deduplicateSchedules(schedules []map[string]interface{}
 		if len(startTime) > 5 {
 			startTime = startTime[:5]
 		}
-		sig := classDate + "|" + startTime
+		batchID := strings.TrimSpace(strings.ToLower(u.getString(s["batch_id"])))
+		sig := batchID + "|" + classDate + "|" + startTime
 		
 		if idx, found := seen[sig]; found {
 			existing := deduplicated[idx]
@@ -1479,7 +1480,24 @@ func (u *teacherUsecase) UpdateTaskClass(ctx context.Context, teacherID int64, t
 		// An active schedule exists! Let's update it instead of creating a duplicate row.
 		if classStatus == "rescheduled" {
 			// Update existing schedule to cancelled
-			origReason := fmt.Sprintf("Rescheduled to %s %s: %s", updates["classDate"], updates["startTime"], updates["rescheduleReason"])
+			var reschedDateStr, reschedTimeStr, reschedReasonStr string
+			if d, ok := updates["classDate"].(string); ok {
+				reschedDateStr = d
+			} else if d, ok := updates["class_date"].(string); ok {
+				reschedDateStr = d
+			}
+			if t, ok := updates["startTime"].(string); ok {
+				reschedTimeStr = t
+			} else if t, ok := updates["start_time"].(string); ok {
+				reschedTimeStr = t
+			}
+			if r, ok := updates["rescheduleReason"].(string); ok {
+				reschedReasonStr = r
+			} else if r, ok := updates["reschedule_reason"].(string); ok {
+				reschedReasonStr = r
+			}
+			origReason := fmt.Sprintf("Rescheduled to %s %s: %s", reschedDateStr, reschedTimeStr, reschedReasonStr)
+
 			existing.ClassStatus = "cancelled"
 			existing.RescheduleReason = &origReason
 			if err := u.repo.UpdateClassSchedule(ctx, existing); err != nil {
@@ -1777,4 +1795,11 @@ func (u *teacherUsecase) UpdateTaskClass(ctx context.Context, teacherID int64, t
 	}
 
 	return nil, errors.New("unsupported class status update")
+}
+
+func formatTime(tStr string) string {
+	if len(tStr) == 5 {
+		return tStr + ":00"
+	}
+	return tStr
 }
