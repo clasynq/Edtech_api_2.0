@@ -1515,7 +1515,7 @@ func (u *teacherUsecase) UpdateTaskClass(ctx context.Context, teacherID int64, t
 			}
 			origReason := fmt.Sprintf("Rescheduled to %s %s: %s", reschedDateStr, reschedTimeStr, reschedReasonStr)
 
-			existing.ClassStatus = "cancelled"
+			existing.ClassStatus = "rescheduled"
 			existing.RescheduleReason = &origReason
 			if err := u.repo.UpdateClassSchedule(ctx, existing); err != nil {
 				return nil, err
@@ -1709,7 +1709,7 @@ func (u *teacherUsecase) UpdateTaskClass(ctx context.Context, teacherID int64, t
 			ClassDate:        originalDate,
 			StartTime:        originalStartTime,
 			EndTime:          originalEndTime,
-			ClassStatus:      "cancelled",
+			ClassStatus:      "rescheduled",
 			RescheduleReason: &origReason,
 			CreatedAt:        time.Now(),
 		}

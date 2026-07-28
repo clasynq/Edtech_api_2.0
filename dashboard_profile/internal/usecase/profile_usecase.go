@@ -456,7 +456,11 @@ func (u *profileUsecase) GetStudyDashboard(ctx context.Context, userID int64, ca
 	for _, s := range schedules {
 		if s.ClassStatus == "completed" || s.ClassStatus == "cancelled" {
 			tDate := time.Time(s.ClassDate)
-			key := fmt.Sprintf("%d:%s:%s", s.CourseID, tDate.Format("2006-01-02"), strings.TrimSpace(strings.ToLower(s.TopicName)))
+			tStr := string(s.StartTime)
+			if len(tStr) >= 5 {
+				tStr = tStr[:5]
+			}
+			key := fmt.Sprintf("%d:%s:%s:%s", s.CourseID, tDate.Format("2006-01-02"), strings.TrimSpace(strings.ToLower(s.TopicName)), tStr)
 			completedOrCancelled[key] = true
 		}
 	}
@@ -467,7 +471,11 @@ func (u *profileUsecase) GetStudyDashboard(ctx context.Context, userID int64, ca
 
 	for _, s := range schedules {
 		tDate := time.Time(s.ClassDate)
-		key := fmt.Sprintf("%d:%s:%s", s.CourseID, tDate.Format("2006-01-02"), strings.TrimSpace(strings.ToLower(s.TopicName)))
+		tStr := string(s.StartTime)
+		if len(tStr) >= 5 {
+			tStr = tStr[:5]
+		}
+		key := fmt.Sprintf("%d:%s:%s:%s", s.CourseID, tDate.Format("2006-01-02"), strings.TrimSpace(strings.ToLower(s.TopicName)), tStr)
 		if completedOrCancelled[key] && (s.ClassStatus == "pending" || s.ClassStatus == "rescheduled") {
 			continue
 		}
