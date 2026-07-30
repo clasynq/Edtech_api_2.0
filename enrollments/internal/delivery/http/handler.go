@@ -306,6 +306,7 @@ func (h *enrollmentHandler) CreateCoupon(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
+		log.Printf("[CreateCoupon] bind error: %v, request: %+v", err, req)
 		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
 		return
 	}
@@ -320,7 +321,8 @@ func (h *enrollmentHandler) CreateCoupon(c *gin.Context) {
 	}
 
 	if parseErr != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "invalid expiresAt format"})
+		log.Printf("[CreateCoupon] parse error for %s: %v", req.ExpiresAt, parseErr)
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "invalid expiresAt format: " + parseErr.Error()})
 		return
 	}
 
