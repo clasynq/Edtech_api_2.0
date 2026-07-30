@@ -313,11 +313,23 @@ func (h *enrollmentHandler) CreateCoupon(c *gin.Context) {
 
 	var expiresAt time.Time
 	var parseErr error
-	if strings.Contains(req.ExpiresAt, "T") && len(req.ExpiresAt) == 16 {
-		istLoc := time.FixedZone("IST", 19800)
-		expiresAt, parseErr = time.ParseInLocation("2006-01-02T15:04", req.ExpiresAt, istLoc)
-	} else {
-		expiresAt, parseErr = time.Parse(time.RFC3339, req.ExpiresAt)
+	formats := []string{
+		time.RFC3339,
+		"2006-01-02T15:04:05",
+		"2006-01-02T15:04",
+		"2006-01-02 15:04:05",
+		"2006-01-02 15:04",
+	}
+	istLoc := time.FixedZone("IST", 19800)
+	for _, f := range formats {
+		if strings.Contains(f, "Z07:00") {
+			expiresAt, parseErr = time.Parse(f, req.ExpiresAt)
+		} else {
+			expiresAt, parseErr = time.ParseInLocation(f, req.ExpiresAt, istLoc)
+		}
+		if parseErr == nil {
+			break
+		}
 	}
 
 	if parseErr != nil {
