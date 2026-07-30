@@ -224,6 +224,8 @@ func (h *httpHandler) parseTestSeries(c *gin.Context, existing *domain.TestSerie
 			ts.IsPublished, _ = strconv.ParseBool(isPublishedStr)
 		}
 
+		istLoc := time.FixedZone("IST", 19800)
+
 		startDateStr, hasStart := c.GetPostForm("start_date")
 		if !hasStart {
 			startDateStr, hasStart = c.GetPostForm("startDate")
@@ -231,11 +233,11 @@ func (h *httpHandler) parseTestSeries(c *gin.Context, existing *domain.TestSerie
 		if hasStart {
 			if startDateStr == "" {
 				ts.StartDate = nil
-			} else if t, err := time.Parse("2006-01-02T15:04", startDateStr); err == nil {
+			} else if t, err := time.ParseInLocation("2006-01-02T15:04", startDateStr, istLoc); err == nil {
 				ts.StartDate = &t
-			} else if t, err := time.Parse("2006-01-02 15:04", startDateStr); err == nil {
+			} else if t, err := time.ParseInLocation("2006-01-02 15:04", startDateStr, istLoc); err == nil {
 				ts.StartDate = &t
-			} else if t, err := time.Parse("2006-01-02", startDateStr); err == nil {
+			} else if t, err := time.ParseInLocation("2006-01-02", startDateStr, istLoc); err == nil {
 				ts.StartDate = &t
 			} else if t, err := time.Parse(time.RFC3339, startDateStr); err == nil {
 				ts.StartDate = &t
@@ -249,11 +251,11 @@ func (h *httpHandler) parseTestSeries(c *gin.Context, existing *domain.TestSerie
 		if hasEnd {
 			if endDateStr == "" {
 				ts.EndDate = nil
-			} else if t, err := time.Parse("2006-01-02T15:04", endDateStr); err == nil {
+			} else if t, err := time.ParseInLocation("2006-01-02T15:04", endDateStr, istLoc); err == nil {
 				ts.EndDate = &t
-			} else if t, err := time.Parse("2006-01-02 15:04", endDateStr); err == nil {
+			} else if t, err := time.ParseInLocation("2006-01-02 15:04", endDateStr, istLoc); err == nil {
 				ts.EndDate = &t
-			} else if t, err := time.Parse("2006-01-02", endDateStr); err == nil {
+			} else if t, err := time.ParseInLocation("2006-01-02", endDateStr, istLoc); err == nil {
 				ts.EndDate = &t
 			} else if t, err := time.Parse(time.RFC3339, endDateStr); err == nil {
 				ts.EndDate = &t
