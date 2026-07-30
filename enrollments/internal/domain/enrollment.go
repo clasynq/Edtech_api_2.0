@@ -139,6 +139,7 @@ type PaymentOrder struct {
 	OrderType             string     `gorm:"column:order_type;type:varchar(50);not null" json:"orderType"`
 	ReferrerID            *int64     `gorm:"column:referrer_id" json:"referrerId"`
 	CoinsRedeemed         int        `gorm:"column:coins_redeemed;type:integer;not null;default:0" json:"coinsRedeemed"`
+	CouponCode            *string    `gorm:"column:coupon_code;type:varchar(50)" json:"couponCode"`
 	TestSeriesID          *int64     `gorm:"column:test_series_id" json:"testSeriesId"`
 	AccountAgeAtOrderDays int        `gorm:"column:account_age_at_order_days;type:integer;not null" json:"accountAgeAtOrderDays"`
 	DeviceFingerprint     *string    `gorm:"column:device_fingerprint;type:varchar(255)" json:"deviceFingerprint"`
@@ -276,6 +277,14 @@ type EnrollmentRepository interface {
 
 	CreateAuditLog(ctx context.Context, log *PaymentAuditLog) error
 	GetMyEnrollments(ctx context.Context, studentID int64, category string) ([]map[string]interface{}, error)
+
+	// Coupon methods
+	CreateCoupon(ctx context.Context, coupon *Coupon) error
+	GetCouponByCode(ctx context.Context, code string) (*Coupon, error)
+	GetCouponByID(ctx context.Context, id int64) (*Coupon, error)
+	UpdateCoupon(ctx context.Context, coupon *Coupon) error
+	DeleteCoupon(ctx context.Context, id int64) error
+	ListCoupons(ctx context.Context) ([]Coupon, error)
 }
 
 type EnrollmentUsecase interface {
@@ -286,4 +295,27 @@ type EnrollmentUsecase interface {
 	RefundOrder(ctx context.Context, orderID int64) error
 	ProcessPendingReferrals(ctx context.Context) error
 	GetMyEnrollments(ctx context.Context, userID int64, category string) ([]map[string]interface{}, error)
+
+	// Coupon methods
+	CreateCoupon(ctx context.Context, coupon *Coupon) error
+	GetCouponByCode(ctx context.Context, code string) (*Coupon, error)
+	DeleteCoupon(ctx context.Context, id int64) error
+	ListCoupons(ctx context.Context) ([]Coupon, error)
+	ValidateCoupon(ctx context.Context, code string, buyerID int64) (*Coupon, error)
+}
+
+// Coupon represents the coupons table
+type Coupon struct {
+	ID                 int64      `gorm:"primaryKey;column:id" json:"id"`
+	Code               string     `gorm:"column:code;type:varchar(50);uniqueIndex;not null" json:"code"`
+	DiscountPercentage int        `gorm:"column:discount_percentage;type:integer;not null" json:"discountPercentage"`
+	UserEmail          string     `gorm:"column:user_email;type:varchar(255);not null" json:"userEmail"`
+	IsUsed             bool       `gorm:"column:is_used;type:boolean;default:false;not null" json:"isUsed"`
+	UsedAt             *time.Time `gorm:"column:used_at;type:timestamp with time zone" json:"usedAt"`
+	CreatedAt          time.Time  `gorm:"column:created_at;type:timestamp with time zone;autoCreateTime" json:"createdAt"`
+	ExpiresAt          time.Time  `gorm:"column:expires_at;type:timestamp with time zone;not null" json:"expiresAt"`
+}
+
+func (Coupon) TableName() string {
+	return "coupons"
 }

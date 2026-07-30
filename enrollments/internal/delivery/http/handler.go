@@ -4,6 +4,8 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	"clasynq/api/enrollments/internal/domain"
 
@@ -38,6 +40,18 @@ func RegisterRoutes(
 		authAPI.POST("/verify", handler.VerifyPayment)
 		authAPI.POST("/order/:id/refund/", AdminRequired(), handler.RefundOrder)
 		authAPI.POST("/order/:id/refund", AdminRequired(), handler.RefundOrder)
+
+		// Coupon routes for Admin
+		authAPI.GET("/coupons/", AdminRequired(), handler.ListCoupons)
+		authAPI.GET("/coupons", AdminRequired(), handler.ListCoupons)
+		authAPI.POST("/coupons/", AdminRequired(), handler.CreateCoupon)
+		authAPI.POST("/coupons", AdminRequired(), handler.CreateCoupon)
+		authAPI.DELETE("/coupons/:id/", AdminRequired(), handler.DeleteCoupon)
+		authAPI.DELETE("/coupons/:id", AdminRequired(), handler.DeleteCoupon)
+
+		// Coupon validation for Checkout (student)
+		authAPI.POST("/coupons/validate/", handler.ValidateCoupon)
+		authAPI.POST("/coupons/validate", handler.ValidateCoupon)
 
 		// Compatibility paths for Notes and Test Series payments
 		authAPI.POST("/notes/:id/order/create/", handler.CreateNoteOrder)
@@ -272,4 +286,97 @@ func (h *enrollmentHandler) GetMyEnrollments(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, res)
+}
+
+func (h *enrollmentHandler) ListCoupons(c *gin.Context) {
+	coupons, err := h.uc.ListCoupons(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, coupons)
+}
+
+func (h *enrollmentHandler) CreateCoupon(c *gin.Context) {
+	var req struct {
+		Code               string `json:"code" binding:"required"`
+		DiscountPercentage int    `json:"discountPercentage" binding:"required"`
+		UserEmail          string `json:"userEmail" binding:"required"`
+		ExpiresAt          string `json:"expiresAt" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+		return
+	}
+
+	var expiresAt time.Time
+	var parseErr error
+	if strings.Contains(req.ExpiresAt, "T") && len(req.ExpiresAt) == 16 {
+		istLoc := time.FixedZone("IST", 19800)
+		expiresAt, parseErr = time.ParseInLocation("2006-01-02T15:04", req.ExpiresAt, istLoc)
+	} else {
+		expiresAt, parseErr = time.Parse(time.RFC3339, req.ExpiresAt)
+	}
+
+	if parseErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "invalid expiresAt format"})
+		return
+	}
+
+	coupon := &domain.Coupon{
+		Code:               req.Code,
+		DiscountPercentage: req.DiscountPercentage,
+		UserEmail:          req.UserEmail,
+		ExpiresAt:          expiresAt,
+	}
+
+	if err := h.uc.CreateCoupon(c.Request.Context(), coupon); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, coupon)
+}
+
+func (h *enrollmentHandler) DeleteCoupon(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "invalid coupon ID"})
+		return
+	}
+
+	if err := h.uc.DeleteCoupon(c.Request.Context(), id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "deleted", "message": "Coupon successfully deleted"})
+}
+
+func (h *enrollmentHandler) ValidateCoupon(c *gin.Context) {
+	var req struct {
+		Code string `json:"code" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+		return
+	}
+
+	userIDVal, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"detail": "Authentication required"})
+		return
+	}
+	userID := userIDVal.(int64)
+
+	coupon, err := h.uc.ValidateCoupon(c.Request.Context(), req.Code, userID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, coupon)
 }

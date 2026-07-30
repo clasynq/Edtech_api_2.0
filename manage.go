@@ -956,6 +956,7 @@ func main() {
 		&domain.WebhookEvent{},
 		&domain.PaymentAuditLog{},
 		&domain.Enrollment{},
+		&domain.Coupon{},
 	)
 	if err != nil {
 		log.Fatalf("AutoMigrate failed: %v", err)

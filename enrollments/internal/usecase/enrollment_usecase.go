@@ -280,9 +280,28 @@ func (u *enrollmentUsecase) CreateOrder(ctx context.Context, buyerID int64, buye
 		deviceFingerprint = dfVal.(string)
 	}
 
+	couponCode := ""
+	if coupVal, ok := req["couponCode"]; ok && coupVal != nil {
+		couponCode = coupVal.(string)
+	}
+
+	// Coins/referrals cannot be redeemed simultaneously with a coupon code
+	if couponCode != "" && (referralCode != "" || redeemCoins || coinsToRedeem > 0) {
+		return nil, errors.New("coupons cannot be combined with other discounts or coins")
+	}
+
 	// Coins cannot be redeemed simultaneously with a referral code
 	if referralCode != "" && (redeemCoins || coinsToRedeem > 0) {
 		return nil, errors.New("coins cannot be redeemed simultaneously with a referral code")
+	}
+
+	var activeCoupon *domain.Coupon = nil
+	if couponCode != "" {
+		coupon, err := u.ValidateCoupon(ctx, couponCode, buyerID)
+		if err != nil {
+			return nil, err
+		}
+		activeCoupon = coupon
 	}
 
 	finalPrice := basePrice
@@ -290,7 +309,13 @@ func (u *enrollmentUsecase) CreateOrder(ctx context.Context, buyerID int64, buye
 	var referrerID *int64 = nil
 
 	// Apply discount logic
-	if orderType == "course" {
+	if activeCoupon != nil {
+		discountAmount := math.Round(basePrice * (float64(activeCoupon.DiscountPercentage) / 100.0))
+		finalPrice = basePrice - discountAmount
+		if finalPrice < 0 {
+			finalPrice = 0
+		}
+	} else if orderType == "course" {
 		if referralCode != "" {
 			res, err := u.ValidateReferral(ctx, buyerID, buyerIP, referralCode, courseID)
 			if err != nil {
@@ -367,6 +392,10 @@ func (u *enrollmentUsecase) CreateOrder(ctx context.Context, buyerID int64, buye
 		UserAgent:             &userAgent,
 	}
 
+	if couponCode != "" {
+		order.CouponCode = &couponCode
+	}
+
 	if courseID > 0 {
 		order.CourseID = &courseID
 	}
@@ -421,6 +450,16 @@ func (u *enrollmentUsecase) CreateOrder(ctx context.Context, buyerID int64, buye
 			UserID:         &buyerID,
 		}
 		_ = txRepo.CreateAuditLog(ctx, audit)
+
+		// Mark coupon as used if applied
+		if activeCoupon != nil {
+			activeCoupon.IsUsed = true
+			now := time.Now()
+			activeCoupon.UsedAt = &now
+			if err := txRepo.UpdateCoupon(ctx, activeCoupon); err != nil {
+				return nil, err
+			}
+		}
 
 		if err := txRepo.CommitTx(); err != nil {
 			return nil, err
@@ -635,6 +674,17 @@ func (u *enrollmentUsecase) VerifyPayment(ctx context.Context, buyerID int64, re
 	}
 	_ = txRepo.CreateAuditLog(ctx, audit)
 
+	// Mark coupon as used if applied
+	if order.CouponCode != nil && *order.CouponCode != "" {
+		coupon, err := txRepo.GetCouponByCode(ctx, *order.CouponCode)
+		if err == nil && coupon != nil {
+			coupon.IsUsed = true
+			now := time.Now()
+			coupon.UsedAt = &now
+			_ = txRepo.UpdateCoupon(ctx, coupon)
+		}
+	}
+
 	if err := txRepo.CommitTx(); err != nil {
 		return nil, err
 	}
@@ -823,6 +873,17 @@ func (u *enrollmentUsecase) HandleWebhook(ctx context.Context, rawBody []byte, s
 					ReferrerID:      *order.ReferrerID,
 				}
 				_ = txRepo.CreateReferralTransaction(ctx, refTx)
+			}
+
+			// Mark coupon as used if applied
+			if order.CouponCode != nil && *order.CouponCode != "" {
+				coupon, err := txRepo.GetCouponByCode(ctx, *order.CouponCode)
+				if err == nil && coupon != nil {
+					coupon.IsUsed = true
+					now := time.Now()
+					coupon.UsedAt = &now
+					_ = txRepo.UpdateCoupon(ctx, coupon)
+				}
 			}
 		}
 
@@ -1093,4 +1154,73 @@ func (u *enrollmentUsecase) GetMyEnrollments(ctx context.Context, userID int64, 
 		return []map[string]interface{}{}, nil
 	}
 	return u.repo.GetMyEnrollments(ctx, student.ID, category)
+}
+
+func (u *enrollmentUsecase) CreateCoupon(ctx context.Context, coupon *domain.Coupon) error {
+	if coupon.Code == "" {
+		return errors.New("coupon code is required")
+	}
+	if coupon.UserEmail == "" {
+		return errors.New("student email is required to lock this coupon")
+	}
+	if coupon.DiscountPercentage <= 0 || coupon.DiscountPercentage > 100 {
+		return errors.New("discount percentage must be between 1 and 100")
+	}
+
+	coupon.Code = strings.ToUpper(strings.TrimSpace(coupon.Code))
+	coupon.UserEmail = strings.ToLower(strings.TrimSpace(coupon.UserEmail))
+
+	existing, err := u.repo.GetCouponByCode(ctx, coupon.Code)
+	if err != nil {
+		return err
+	}
+	if existing != nil {
+		return errors.New("a coupon with this code already exists")
+	}
+
+	return u.repo.CreateCoupon(ctx, coupon)
+}
+
+func (u *enrollmentUsecase) GetCouponByCode(ctx context.Context, code string) (*domain.Coupon, error) {
+	code = strings.ToUpper(strings.TrimSpace(code))
+	return u.repo.GetCouponByCode(ctx, code)
+}
+
+func (u *enrollmentUsecase) DeleteCoupon(ctx context.Context, id int64) error {
+	return u.repo.DeleteCoupon(ctx, id)
+}
+
+func (u *enrollmentUsecase) ListCoupons(ctx context.Context) ([]domain.Coupon, error) {
+	return u.repo.ListCoupons(ctx)
+}
+
+func (u *enrollmentUsecase) ValidateCoupon(ctx context.Context, code string, buyerID int64) (*domain.Coupon, error) {
+	code = strings.ToUpper(strings.TrimSpace(code))
+
+	buyer, err := u.repo.GetUserByID(ctx, buyerID)
+	if err != nil {
+		return nil, err
+	}
+	if buyer == nil {
+		return nil, errors.New("user not found")
+	}
+
+	coupon, err := u.repo.GetCouponByCode(ctx, code)
+	if err != nil {
+		return nil, err
+	}
+	if coupon == nil {
+		return nil, errors.New("invalid coupon code")
+	}
+	if coupon.IsUsed {
+		return nil, errors.New("this coupon has already been used")
+	}
+	if time.Now().After(coupon.ExpiresAt) {
+		return nil, errors.New("this coupon has expired")
+	}
+	if strings.ToLower(coupon.UserEmail) != strings.ToLower(buyer.Email) {
+		return nil, errors.New("this coupon is not valid for your email account")
+	}
+
+	return coupon, nil
 }

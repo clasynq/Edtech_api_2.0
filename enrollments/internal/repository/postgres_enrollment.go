@@ -429,6 +429,47 @@ func (r *postgresEnrollmentRepository) GetMyEnrollments(ctx context.Context, stu
 		}
 		data = append(data, item)
 	}
-
 	return data, nil
+}
+
+func (r *postgresEnrollmentRepository) CreateCoupon(ctx context.Context, coupon *domain.Coupon) error {
+	return r.db.WithContext(ctx).Create(coupon).Error
+}
+
+func (r *postgresEnrollmentRepository) GetCouponByCode(ctx context.Context, code string) (*domain.Coupon, error) {
+	var coupon domain.Coupon
+	if err := r.db.WithContext(ctx).Where("code = ?", code).First(&coupon).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &coupon, nil
+}
+
+func (r *postgresEnrollmentRepository) GetCouponByID(ctx context.Context, id int64) (*domain.Coupon, error) {
+	var coupon domain.Coupon
+	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&coupon).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &coupon, nil
+}
+
+func (r *postgresEnrollmentRepository) UpdateCoupon(ctx context.Context, coupon *domain.Coupon) error {
+	return r.db.WithContext(ctx).Save(coupon).Error
+}
+
+func (r *postgresEnrollmentRepository) DeleteCoupon(ctx context.Context, id int64) error {
+	return r.db.WithContext(ctx).Delete(&domain.Coupon{}, id).Error
+}
+
+func (r *postgresEnrollmentRepository) ListCoupons(ctx context.Context) ([]domain.Coupon, error) {
+	var coupons []domain.Coupon
+	if err := r.db.WithContext(ctx).Order("created_at desc").Find(&coupons).Error; err != nil {
+		return nil, err
+	}
+	return coupons, nil
 }
