@@ -58,6 +58,18 @@ func (u *cbtExamUsecase) StartAttempt(ctx context.Context, userID int64, testIDO
 		return nil, nil, errors.New("you do not have access to this test series")
 	}
 
+	// Check if test series is expired or not started yet
+	ts, err := u.repo.GetTestSeriesByIDOrSlug(ctx, strconv.FormatInt(test.TestSeriesID, 10))
+	if err == nil && ts != nil {
+		now := time.Now()
+		if ts.EndDate != nil && !ts.EndDate.IsZero() && now.After(*ts.EndDate) {
+			return nil, nil, errors.New("this test series has expired and can no longer be accessed")
+		}
+		if ts.StartDate != nil && !ts.StartDate.IsZero() && now.Before(*ts.StartDate) {
+			return nil, nil, errors.New("this test series has not started yet")
+		}
+	}
+
 	// 2. Check for existing attempt
 	attempt, err := u.repo.GetLastAttemptForStudentAndTest(ctx, student.ID, test.ID)
 	if err != nil {

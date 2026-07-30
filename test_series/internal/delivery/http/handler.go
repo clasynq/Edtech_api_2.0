@@ -231,6 +231,10 @@ func (h *httpHandler) parseTestSeries(c *gin.Context, existing *domain.TestSerie
 		if hasStart {
 			if startDateStr == "" {
 				ts.StartDate = nil
+			} else if t, err := time.Parse("2006-01-02T15:04", startDateStr); err == nil {
+				ts.StartDate = &t
+			} else if t, err := time.Parse("2006-01-02 15:04", startDateStr); err == nil {
+				ts.StartDate = &t
 			} else if t, err := time.Parse("2006-01-02", startDateStr); err == nil {
 				ts.StartDate = &t
 			} else if t, err := time.Parse(time.RFC3339, startDateStr); err == nil {
@@ -245,6 +249,10 @@ func (h *httpHandler) parseTestSeries(c *gin.Context, existing *domain.TestSerie
 		if hasEnd {
 			if endDateStr == "" {
 				ts.EndDate = nil
+			} else if t, err := time.Parse("2006-01-02T15:04", endDateStr); err == nil {
+				ts.EndDate = &t
+			} else if t, err := time.Parse("2006-01-02 15:04", endDateStr); err == nil {
+				ts.EndDate = &t
 			} else if t, err := time.Parse("2006-01-02", endDateStr); err == nil {
 				ts.EndDate = &t
 			} else if t, err := time.Parse(time.RFC3339, endDateStr); err == nil {

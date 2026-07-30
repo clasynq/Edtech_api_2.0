@@ -765,6 +765,30 @@ func runGormAutoMigrate(dbURL string) {
 		-- Drop the invalid polymorphic UserNotification foreign key if it exists
 		ALTER TABLE user_notifications DROP CONSTRAINT IF EXISTS fk_user_notifications_recipient;
 
+		-- Alter test_series start_date and end_date columns to timestamp with time zone if they are date
+		DO $$ 
+		BEGIN
+			IF EXISTS (
+				SELECT 1 
+				FROM information_schema.columns 
+				WHERE table_name = 'test_series' 
+				  AND column_name = 'start_date' 
+				  AND data_type = 'date'
+			) THEN
+				ALTER TABLE test_series ALTER COLUMN start_date TYPE timestamp with time zone USING start_date::timestamp with time zone;
+			END IF;
+
+			IF EXISTS (
+				SELECT 1 
+				FROM information_schema.columns 
+				WHERE table_name = 'test_series' 
+				  AND column_name = 'end_date' 
+				  AND data_type = 'date'
+			) THEN
+				ALTER TABLE test_series ALTER COLUMN end_date TYPE timestamp with time zone USING end_date::timestamp with time zone;
+			END IF;
+		END $$;
+
 		DO $$ 
 		DECLARE 
 			r RECORD;

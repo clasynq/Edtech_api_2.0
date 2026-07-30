@@ -51,8 +51,8 @@ type TestSeries struct {
 	Category    string     `gorm:"column:category;type:varchar(100);not null" json:"category"`
 	BatchID     *string    `gorm:"column:batch_id;type:varchar(50)" json:"batchId"`
 	IsPublished bool       `gorm:"column:is_published;type:boolean;not null;default:false" json:"isPublished"`
-	StartDate   *time.Time `gorm:"column:start_date;type:date" json:"startDate"`
-	EndDate     *time.Time `gorm:"column:end_date;type:date" json:"endDate"`
+	StartDate   *time.Time `gorm:"column:start_date;type:timestamp with time zone" json:"startDate"`
+	EndDate     *time.Time `gorm:"column:end_date;type:timestamp with time zone" json:"endDate"`
 	CreatedAt   time.Time  `gorm:"column:created_at;type:timestamp with time zone;autoCreateTime" json:"createdAt"`
 	CourseID    *int64     `gorm:"column:course_id" json:"courseId"`
 	IsFree      bool       `gorm:"column:is_free;type:boolean;not null;default:false" json:"isFree"`
