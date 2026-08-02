@@ -102,13 +102,23 @@ func (r *postgresTestSeriesRepository) GetTestsBySeriesID(ctx context.Context, s
 
 func (r *postgresTestSeriesRepository) GetQuestionsByTestID(ctx context.Context, testID int64) ([]domain.Question, error) {
 	var questions []domain.Question
-	err := r.db.WithContext(ctx).Where("test_id = ?", testID).Preload("Options").Find(&questions).Error
+	err := r.db.WithContext(ctx).
+		Where("test_id = ?", testID).
+		Order("id ASC").
+		Preload("Options", func(db *gorm.DB) *gorm.DB {
+			return db.Order("id ASC")
+		}).
+		Find(&questions).Error
 	return questions, err
 }
 
 func (r *postgresTestSeriesRepository) GetQuestionByID(ctx context.Context, id int64) (*domain.Question, error) {
 	var q domain.Question
-	if err := r.db.WithContext(ctx).Preload("Options").First(&q, id).Error; err != nil {
+	if err := r.db.WithContext(ctx).
+		Preload("Options", func(db *gorm.DB) *gorm.DB {
+			return db.Order("id ASC")
+		}).
+		First(&q, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
