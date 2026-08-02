@@ -445,10 +445,22 @@ func (u *testSeriesUsecase) UploadQuestions(ctx context.Context, testID int64, d
 		if questionType != "NAT" {
 			hasFlatOptions := false
 			if val, ok := normRow["option_a"]; ok && val != nil && parseStringVal(val) != "" {
-				hasFlatOptions = true
+				if valB, okB := normRow["option_b"]; okB && valB != nil && parseStringVal(valB) != "" {
+					hasFlatOptions = true
+				}
 			}
 			if !hasFlatOptions {
-				qClean, optA, optB, optC, optD, corrAns := parseInlineQuestionAndOptions(*questionText)
+				optAStr := ""
+				if valA, okA := normRow["option_a"]; okA && valA != nil {
+					optAStr = parseStringVal(valA)
+				}
+				
+				sourceText := *questionText
+				if optAStr != "" && (strings.Contains(optAStr, "B)") || strings.Contains(optAStr, "(B)") || strings.Contains(optAStr, "B. ")) {
+					sourceText = sourceText + " A) " + optAStr
+				}
+				
+				qClean, optA, optB, optC, optD, corrAns := parseInlineQuestionAndOptions(sourceText)
 				if optA != "" && optB != "" {
 					questionText = &qClean
 					normRow["option_a"] = optA
@@ -578,8 +590,6 @@ func (u *testSeriesUsecase) UploadQuestions(ctx context.Context, testID int64, d
 							QuestionID: q.ID,
 						}
 						_ = u.repo.CreateQuestionOption(ctx, opt)
-					} else if key == "option_a" || key == "option_b" {
-						return createdCount, errors.New("option_a and option_b are required for MCQ/MSQ")
 					}
 				}
 			}
