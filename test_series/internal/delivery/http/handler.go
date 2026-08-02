@@ -63,6 +63,8 @@ func RegisterRoutes(
 		questions.GET("/", handler.GetQuestions)
 		questions.POST("/", AdminOrTeacherRequired(), handler.CreateQuestion)
 		questions.DELETE("/:id/", AdminOrTeacherRequired(), handler.DeleteQuestion)
+		questions.PUT("/:id/", AdminOrTeacherRequired(), handler.UpdateQuestion)
+		questions.PUT("/:id", AdminOrTeacherRequired(), handler.UpdateQuestion)
 	}
 }
 
@@ -748,6 +750,188 @@ func (h *httpHandler) CreateQuestion(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, q)
+}
+
+func (h *httpHandler) UpdateQuestion(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "invalid question ID"})
+		return
+	}
+
+	existing, err := h.uc.GetQuestionByID(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+		return
+	}
+	if existing == nil {
+		c.JSON(http.StatusNotFound, gin.H{"detail": "question not found"})
+		return
+	}
+
+	questionType := c.PostForm("questionType")
+	if questionType == "" {
+		questionType = c.PostForm("question_type")
+	}
+	if questionType == "" {
+		questionType = existing.QuestionType
+	}
+
+	questionTextStr := c.PostForm("questionText")
+	if questionTextStr == "" {
+		questionTextStr = c.PostForm("question_text")
+	}
+	var questionText *string
+	if questionTextStr != "" {
+		questionText = &questionTextStr
+	}
+
+	correctAnswerStr := c.PostForm("correct_answer")
+	var correctAnswer *string
+	if correctAnswerStr != "" {
+		correctAnswer = &correctAnswerStr
+	} else {
+		correctAnswer = existing.CorrectAnswer
+	}
+
+	marksStr := c.PostForm("marks")
+	marks, _ := strconv.Atoi(marksStr)
+	if marks == 0 {
+		marks = existing.Marks
+	}
+
+	negativeMarksStr := c.PostForm("negativeMarks")
+	if negativeMarksStr == "" {
+		negativeMarksStr = c.PostForm("negative_marks")
+	}
+	var negativeMarks float64
+	if negativeMarksStr != "" {
+		negativeMarks, _ = strconv.ParseFloat(negativeMarksStr, 64)
+	} else {
+		negativeMarks = existing.NegativeMarks
+	}
+
+	questionTimerStr := c.PostForm("questionTimer")
+	if questionTimerStr == "" {
+		questionTimerStr = c.PostForm("question_timer")
+	}
+	var questionTimer *int
+	if questionTimerStr != "" {
+		if parsed, err := strconv.Atoi(questionTimerStr); err == nil {
+			questionTimer = &parsed
+		}
+	} else {
+		questionTimer = existing.QuestionTimer
+	}
+
+	explanationTextStr := c.PostForm("explanationText")
+	if explanationTextStr == "" {
+		explanationTextStr = c.PostForm("explanation_text")
+	}
+	var explanationText *string
+	if explanationTextStr != "" {
+		explanationText = &explanationTextStr
+	} else {
+		explanationText = existing.ExplanationText
+	}
+
+	qImgURL, _ := saveUploadFile(c, "question_image", "questions")
+	var qImgURLPtr *string
+	if qImgURL != "" {
+		qImgURLPtr = &qImgURL
+	} else if c.PostForm("remove_question_image") == "true" {
+		qImgURLPtr = nil
+	} else {
+		qImgURLPtr = existing.QuestionImageURL
+	}
+
+	expImgURL, _ := saveUploadFile(c, "explanation_image", "explanations")
+	var expImgURLPtr *string
+	if expImgURL != "" {
+		expImgURLPtr = &expImgURL
+	} else if c.PostForm("remove_explanation_image") == "true" {
+		expImgURLPtr = nil
+	} else {
+		expImgURLPtr = existing.ExplanationImageURL
+	}
+
+	q := &domain.Question{
+		QuestionType:        questionType,
+		QuestionText:        questionText,
+		QuestionImageURL:    qImgURLPtr,
+		CorrectAnswer:       correctAnswer,
+		Marks:               marks,
+		NegativeMarks:       negativeMarks,
+		QuestionTimer:       questionTimer,
+		ExplanationText:     explanationText,
+		ExplanationImageURL: expImgURLPtr,
+		TestID:              existing.TestID,
+	}
+
+	var options []domain.QuestionOption
+	if questionType != "NAT" {
+		optionKeys := []string{"option_a", "option_b", "option_c", "option_d"}
+		correctList := []string{}
+		if correctAnswerStr != "" {
+			for _, item := range strings.Split(correctAnswerStr, ",") {
+				correctList = append(correctList, strings.TrimSpace(strings.ToUpper(item)))
+			}
+		}
+
+		for _, key := range optionKeys {
+			letter := strings.ToUpper(strings.Split(key, "_")[1])
+			optTextStr := c.PostForm(key)
+			optImgURL, _ := saveUploadFile(c, key+"_image", "options")
+
+			var existingOptImg *string
+			if optImgURL == "" && len(existing.Options) > 0 {
+				oldIdx := -1
+				if key == "option_a" { oldIdx = 0 }
+				if key == "option_b" { oldIdx = 1 }
+				if key == "option_c" { oldIdx = 2 }
+				if key == "option_d" { oldIdx = 3 }
+				if oldIdx >= 0 && oldIdx < len(existing.Options) {
+					existingOptImg = existing.Options[oldIdx].OptionImageURL
+				}
+			}
+
+			if optTextStr != "" || optImgURL != "" || existingOptImg != nil {
+				isCorrect := false
+				for _, item := range correctList {
+					if item == letter {
+						isCorrect = true
+						break
+					}
+				}
+				var optText *string
+				if optTextStr != "" {
+					optText = &optTextStr
+				}
+				var optImg *string
+				if optImgURL != "" {
+					optImg = &optImgURL
+				} else {
+					optImg = existingOptImg
+				}
+				options = append(options, domain.QuestionOption{
+					OptionText:     optText,
+					OptionImageURL: optImg,
+					IsCorrect:      isCorrect,
+				})
+			} else if key == "option_a" || key == "option_b" {
+				c.JSON(http.StatusBadRequest, gin.H{"detail": "option_a and option_b are required for MCQ/MSQ"})
+				return
+			}
+		}
+	}
+
+	if err := h.uc.UpdateQuestion(c.Request.Context(), id, q, options); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, q)
 }
 
 func (h *httpHandler) DeleteQuestion(c *gin.Context) {

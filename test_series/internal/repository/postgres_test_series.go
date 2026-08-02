@@ -248,6 +248,27 @@ func (r *postgresTestSeriesRepository) DeleteQuestion(ctx context.Context, id in
 	})
 }
 
+func (r *postgresTestSeriesRepository) UpdateQuestion(ctx context.Context, question *domain.Question, options []domain.QuestionOption) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(question).Error; err != nil {
+			return err
+		}
+		// Delete existing options
+		if err := tx.Where("question_id = ?", question.ID).Delete(&domain.QuestionOption{}).Error; err != nil {
+			return err
+		}
+		// Insert new options
+		for i := range options {
+			options[i].QuestionID = question.ID
+			options[i].ID = 0
+			if err := tx.Create(&options[i]).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 func (r *postgresTestSeriesRepository) UpdateTestSeries(ctx context.Context, id int64, ts *domain.TestSeries) error {
 	ts.ID = id
 	return r.db.WithContext(ctx).Omit("Tests").Save(ts).Error

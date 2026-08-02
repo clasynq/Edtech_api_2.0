@@ -177,6 +177,7 @@ type TestSeriesRepository interface {
 	CreateQuestion(ctx context.Context, question *Question) error
 	CreateQuestionOption(ctx context.Context, option *QuestionOption) error
 	DeleteQuestion(ctx context.Context, id int64) error
+	UpdateQuestion(ctx context.Context, question *Question, options []QuestionOption) error
 
 	GetStudentByUserID(ctx context.Context, userID int64) (*Student, error)
 	HasTestSeriesAccess(ctx context.Context, studentID, seriesID int64) (bool, error)
@@ -200,7 +201,9 @@ type TestSeriesUsecase interface {
 	AddQuestion(ctx context.Context, q *Question, options []QuestionOption) error
 	CreateQuestion(ctx context.Context, q *Question, options []QuestionOption) error
 	DeleteQuestion(ctx context.Context, id int64) error
+	UpdateQuestion(ctx context.Context, id int64, q *Question, options []QuestionOption) error
 	GetQuestionsByTestID(ctx context.Context, testID int64) ([]Question, error)
+	GetQuestionByID(ctx context.Context, id int64) (*Question, error)
 	UploadQuestions(ctx context.Context, testID int64, data []map[string]interface{}) (int, error)
 	HasAccess(ctx context.Context, userID int64, role string, seriesID int64) (bool, error)
 }

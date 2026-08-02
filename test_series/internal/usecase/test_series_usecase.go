@@ -365,6 +365,31 @@ func (u *testSeriesUsecase) DeleteQuestion(ctx context.Context, id int64) error 
 	return u.repo.DeleteQuestion(ctx, id)
 }
 
+func (u *testSeriesUsecase) UpdateQuestion(ctx context.Context, id int64, q *domain.Question, options []domain.QuestionOption) error {
+	// First check if the question exists
+	existing, err := u.repo.GetQuestionByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		return fmt.Errorf("question not found")
+	}
+
+	q.ID = id
+	q.TestID = existing.TestID
+	q.CreatedAt = existing.CreatedAt
+
+	if err := u.repo.UpdateQuestion(ctx, q, options); err != nil {
+		return err
+	}
+	u.invalidateTestSeriesCache(ctx)
+	return nil
+}
+
+func (u *testSeriesUsecase) GetQuestionByID(ctx context.Context, id int64) (*domain.Question, error) {
+	return u.repo.GetQuestionByID(ctx, id)
+}
+
 func (u *testSeriesUsecase) UploadQuestions(ctx context.Context, testID int64, data []map[string]interface{}) (int, error) {
 	createdCount := 0
 
