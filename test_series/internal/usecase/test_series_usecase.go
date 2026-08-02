@@ -528,6 +528,7 @@ func (u *testSeriesUsecase) UploadQuestions(ctx context.Context, testID int64, d
 		}
 
 		if questionType != "NAT" {
+			optionsCreated := false
 			if optsVal, ok := normRow["options"]; ok && optsVal != nil {
 				if optsList, ok := optsVal.([]interface{}); ok {
 					for _, optRaw := range optsList {
@@ -541,11 +542,14 @@ func (u *testSeriesUsecase) UploadQuestions(ctx context.Context, testID int64, d
 									QuestionID: q.ID,
 								}
 								_ = u.repo.CreateQuestionOption(ctx, opt)
+								optionsCreated = true
 							}
 						}
 					}
 				}
-			} else {
+			}
+
+			if !optionsCreated {
 				optionKeys := []string{"option_a", "option_b", "option_c", "option_d"}
 				correctList := []string{}
 				if correctAnswer != nil {
