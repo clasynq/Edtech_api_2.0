@@ -791,12 +791,51 @@ func (h *httpHandler) UploadQuestions(c *gin.Context) {
 	defer fileReader.Close()
 
 	if strings.HasSuffix(filename, ".json") {
-		var list []map[string]interface{}
-		if err := json.NewDecoder(fileReader).Decode(&list); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("invalid json file: %v", err)})
+		bytes, err := io.ReadAll(fileReader)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"detail": "failed to read json file"})
 			return
 		}
-		dataList = list
+
+		// Try parsing as array first
+		var list []map[string]interface{}
+		if err := json.Unmarshal(bytes, &list); err == nil {
+			dataList = list
+		} else {
+			// Try parsing as single object
+			var obj map[string]interface{}
+			if err := json.Unmarshal(bytes, &obj); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("invalid json file: %v", err)})
+				return
+			}
+
+			// Check common list wrapper keys: "questions", "data", "list", "results"
+			var foundList []interface{}
+			for _, k := range []string{"questions", "data", "list", "results"} {
+				if val, exists := obj[k]; exists {
+					if subList, ok := val.([]interface{}); ok {
+						foundList = subList
+						break
+					}
+				}
+			}
+
+			if foundList != nil {
+				for _, item := range foundList {
+					if m, ok := item.(map[string]interface{}); ok {
+						dataList = append(dataList, m)
+					}
+				}
+			} else {
+				// Treat as a single question object if it has question_text
+				if _, exists := obj["question_text"]; exists {
+					dataList = append(dataList, obj)
+				} else {
+					c.JSON(http.StatusBadRequest, gin.H{"detail": "invalid json: root must be a list of questions, a wrapper object with 'questions' list, or a single question object"})
+					return
+				}
+			}
+		}
 	} else if strings.HasSuffix(filename, ".csv") {
 		// Auto-detect delimiter
 		commaCount := 0
