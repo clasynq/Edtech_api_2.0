@@ -405,6 +405,24 @@ func (u *testSeriesUsecase) UploadQuestions(ctx context.Context, testID int64, d
 			normRow[strings.ToLower(strings.TrimSpace(cleanKey))] = v
 		}
 
+		// Normalize options if passed as a map instead of flat keys
+		if optsVal, ok := normRow["options"]; ok && optsVal != nil {
+			if optsMap, ok := optsVal.(map[string]interface{}); ok {
+				for optK, optV := range optsMap {
+					cleanOptK := strings.ToLower(strings.TrimSpace(optK))
+					if cleanOptK == "a" || cleanOptK == "option_a" {
+						normRow["option_a"] = optV
+					} else if cleanOptK == "b" || cleanOptK == "option_b" {
+						normRow["option_b"] = optV
+					} else if cleanOptK == "c" || cleanOptK == "option_c" {
+						normRow["option_c"] = optV
+					} else if cleanOptK == "d" || cleanOptK == "option_d" {
+						normRow["option_d"] = optV
+					}
+				}
+			}
+		}
+
 		questionType := "MCQ"
 		if qtVal, ok := normRow["question_type"]; ok && qtVal != nil {
 			questionType = strings.ToUpper(strings.TrimSpace(parseStringVal(qtVal)))
@@ -414,10 +432,34 @@ func (u *testSeriesUsecase) UploadQuestions(ctx context.Context, testID int64, d
 		if qtTextVal, ok := normRow["question_text"]; ok && qtTextVal != nil {
 			strVal := parseStringVal(qtTextVal)
 			questionText = &strVal
+		} else if qVal, ok := normRow["question"]; ok && qVal != nil {
+			strVal := parseStringVal(qVal)
+			questionText = &strVal
 		}
 
 		if questionText == nil || *questionText == "" {
 			return createdCount, errors.New("question_text is required")
+		}
+
+		// Try parsing inline options and correct answers if flat options are missing for MCQ/MSQ
+		if questionType != "NAT" {
+			hasFlatOptions := false
+			if val, ok := normRow["option_a"]; ok && val != nil && parseStringVal(val) != "" {
+				hasFlatOptions = true
+			}
+			if !hasFlatOptions {
+				qClean, optA, optB, optC, optD, corrAns := parseInlineQuestionAndOptions(*questionText)
+				if optA != "" && optB != "" {
+					questionText = &qClean
+					normRow["option_a"] = optA
+					normRow["option_b"] = optB
+					normRow["option_c"] = optC
+					normRow["option_d"] = optD
+					if corrAns != "" && (normRow["correct_answer"] == nil || parseStringVal(normRow["correct_answer"]) == "") {
+						normRow["correct_answer"] = corrAns
+					}
+				}
+			}
 		}
 
 		var correctAnswer *string
@@ -560,6 +602,58 @@ func parseStringVal(val interface{}) string {
 	default:
 		return fmt.Sprintf("%v", v)
 	}
+}
+
+func parseInlineQuestionAndOptions(rawQText string) (string, string, string, string, string, string) {
+	q := strings.TrimSpace(rawQText)
+	var corrAns string
+	var mainPart string = q
+
+	lowerQ := strings.ToLower(q)
+	ansMarkers := []string{" ans :", " ans:", " :"}
+	for _, marker := range ansMarkers {
+		idx := strings.LastIndex(lowerQ, marker)
+		if idx != -1 && idx > len(q)/2 {
+			ansText := q[idx+len(marker):]
+			ansClean := strings.ToUpper(strings.TrimSpace(ansText))
+			if strings.Contains(ansClean, "A") {
+				corrAns = "A"
+			} else if strings.Contains(ansClean, "B") {
+				corrAns = "B"
+			} else if strings.Contains(ansClean, "C") {
+				corrAns = "C"
+			} else if strings.Contains(ansClean, "D") {
+				corrAns = "D"
+			}
+			mainPart = strings.TrimSpace(q[:idx])
+			break
+		}
+	}
+
+	markers := [][]string{
+		{"A)", "B)", "C)", "D)"},
+		{"(A)", "(B)", "(C)", "(D)"},
+		{"A. ", "B. ", "C. ", "D. "},
+	}
+
+	for _, set := range markers {
+		aIdx := strings.Index(mainPart, set[0])
+		bIdx := strings.Index(mainPart, set[1])
+		cIdx := strings.Index(mainPart, set[2])
+		dIdx := strings.Index(mainPart, set[3])
+
+		if aIdx != -1 && bIdx != -1 && cIdx != -1 && dIdx != -1 && aIdx < bIdx && bIdx < cIdx && cIdx < dIdx {
+			qText := strings.TrimSpace(mainPart[:aIdx])
+			optA := strings.TrimSpace(mainPart[aIdx+len(set[0]) : bIdx])
+			optB := strings.TrimSpace(mainPart[bIdx+len(set[1]) : cIdx])
+			optC := strings.TrimSpace(mainPart[cIdx+len(set[2]) : dIdx])
+			optD := strings.TrimSpace(mainPart[dIdx+len(set[3]):])
+
+			return qText, optA, optB, optC, optD, corrAns
+		}
+	}
+
+	return q, "", "", "", "", corrAns
 }
 
 func (u *testSeriesUsecase) GetQuestionsByTestID(ctx context.Context, testID int64) ([]domain.Question, error) {
