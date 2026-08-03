@@ -453,7 +453,10 @@ func (u *enrollmentUsecase) CreateOrder(ctx context.Context, buyerID int64, buye
 
 		// Mark coupon as used if applied
 		if activeCoupon != nil {
-			activeCoupon.IsUsed = true
+			activeCoupon.UsesCount = activeCoupon.UsesCount + 1
+			if activeCoupon.MaxUses > 0 && activeCoupon.UsesCount >= activeCoupon.MaxUses {
+				activeCoupon.IsUsed = true
+			}
 			now := time.Now()
 			activeCoupon.UsedAt = &now
 			if err := txRepo.UpdateCoupon(ctx, activeCoupon); err != nil {
@@ -678,7 +681,10 @@ func (u *enrollmentUsecase) VerifyPayment(ctx context.Context, buyerID int64, re
 	if order.CouponCode != nil && *order.CouponCode != "" {
 		coupon, err := txRepo.GetCouponByCode(ctx, *order.CouponCode)
 		if err == nil && coupon != nil {
-			coupon.IsUsed = true
+			coupon.UsesCount = coupon.UsesCount + 1
+			if coupon.MaxUses > 0 && coupon.UsesCount >= coupon.MaxUses {
+				coupon.IsUsed = true
+			}
 			now := time.Now()
 			coupon.UsedAt = &now
 			_ = txRepo.UpdateCoupon(ctx, coupon)
@@ -879,7 +885,10 @@ func (u *enrollmentUsecase) HandleWebhook(ctx context.Context, rawBody []byte, s
 			if order.CouponCode != nil && *order.CouponCode != "" {
 				coupon, err := txRepo.GetCouponByCode(ctx, *order.CouponCode)
 				if err == nil && coupon != nil {
-					coupon.IsUsed = true
+					coupon.UsesCount = coupon.UsesCount + 1
+					if coupon.MaxUses > 0 && coupon.UsesCount >= coupon.MaxUses {
+						coupon.IsUsed = true
+					}
 					now := time.Now()
 					coupon.UsedAt = &now
 					_ = txRepo.UpdateCoupon(ctx, coupon)
@@ -1212,8 +1221,8 @@ func (u *enrollmentUsecase) ValidateCoupon(ctx context.Context, code string, buy
 	if coupon == nil {
 		return nil, errors.New("invalid coupon code")
 	}
-	if coupon.IsUsed {
-		return nil, errors.New("this coupon has already been used")
+	if (coupon.MaxUses > 0 && coupon.UsesCount >= coupon.MaxUses) || coupon.IsUsed {
+		return nil, errors.New("this coupon has reached its usage limit")
 	}
 	if time.Now().After(coupon.ExpiresAt) {
 		return nil, errors.New("this coupon has expired")

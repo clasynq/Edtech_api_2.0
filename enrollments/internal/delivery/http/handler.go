@@ -303,6 +303,7 @@ func (h *enrollmentHandler) CreateCoupon(c *gin.Context) {
 		DiscountPercentage int    `json:"discountPercentage" binding:"required"`
 		UserEmail          string `json:"userEmail" binding:"required"`
 		ExpiresAt          string `json:"expiresAt" binding:"required"`
+		MaxUses            *int   `json:"maxUses"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -338,11 +339,18 @@ func (h *enrollmentHandler) CreateCoupon(c *gin.Context) {
 		return
 	}
 
+	maxUsesVal := 1
+	if req.MaxUses != nil {
+		maxUsesVal = *req.MaxUses
+	}
+
 	coupon := &domain.Coupon{
 		Code:               req.Code,
 		DiscountPercentage: req.DiscountPercentage,
 		UserEmail:          req.UserEmail,
 		ExpiresAt:          expiresAt,
+		MaxUses:            maxUsesVal,
+		UsesCount:          0,
 	}
 
 	if err := h.uc.CreateCoupon(c.Request.Context(), coupon); err != nil {

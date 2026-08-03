@@ -314,6 +314,8 @@ type Coupon struct {
 	UsedAt             *time.Time `gorm:"column:used_at;type:timestamp with time zone" json:"usedAt"`
 	CreatedAt          time.Time  `gorm:"column:created_at;type:timestamp with time zone;autoCreateTime" json:"createdAt"`
 	ExpiresAt          time.Time  `gorm:"column:expires_at;type:timestamp with time zone;not null" json:"expiresAt"`
+	MaxUses            int        `gorm:"column:max_uses;type:integer;default:1;not null" json:"maxUses"`
+	UsesCount          int        `gorm:"column:uses_count;type:integer;default:0;not null" json:"usesCount"`
 }
 
 func (Coupon) TableName() string {
