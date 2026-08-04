@@ -453,6 +453,92 @@ func (u *courseUsecase) UpdateSchedule(ctx context.Context, id int64, updates ma
 		return nil, errors.New("schedule not found")
 	}
 
+	var statusVal string
+	if val, ok := updates["classStatus"].(string); ok {
+		statusVal = val
+	} else if val, ok := updates["class_status"].(string); ok {
+		statusVal = val
+	}
+
+	if statusVal == "rescheduled" {
+		// 1. Parse new date
+		var newDate time.Time
+		var err error
+		if val, ok := updates["classDate"]; ok {
+			newDate, err = parseDate(val)
+		} else if val, ok := updates["class_date"]; ok {
+			newDate, err = parseDate(val)
+		} else {
+			return nil, errors.New("reschedule date is required")
+		}
+		if err != nil {
+			return nil, errors.New("invalid reschedule date format")
+		}
+
+		// 2. Parse new start time
+		var newStartTime string
+		if val, ok := updates["startTime"]; ok {
+			newStartTime = val.(string)
+		} else if val, ok := updates["start_time"]; ok {
+			newStartTime = val.(string)
+		}
+		if newStartTime == "" {
+			newStartTime = "10:00"
+		}
+
+		// 3. Parse new end time
+		var newEndTime string
+		if val, ok := updates["endTime"]; ok {
+			newEndTime = val.(string)
+		} else if val, ok := updates["end_time"]; ok {
+			newEndTime = val.(string)
+		}
+		if newEndTime == "" {
+			newEndTime = newStartTime
+			tObj, err := time.Parse("15:04", newStartTime[:5])
+			if err == nil {
+				newEndTime = tObj.Add(2 * time.Hour).Format("15:04:05")
+			}
+		}
+
+		// 4. Parse reschedule reason
+		var reason string
+		if val, ok := updates["rescheduleReason"]; ok {
+			reason = val.(string)
+		} else if val, ok := updates["reschedule_reason"]; ok {
+			reason = val.(string)
+		}
+
+		// 5. Update original row to cancelled and store the formatted reschedule destination info
+		origReason := fmt.Sprintf("Rescheduled to %s %s: %s", newDate.Format("2006-01-02"), newStartTime[:5], reason)
+		schedule.ClassStatus = "cancelled"
+		schedule.RescheduleReason = &origReason
+		if err := u.repo.UpdateSchedule(ctx, schedule); err != nil {
+			return nil, err
+		}
+
+		// 6. Create new pending class schedule row
+		newSched := &domain.ClassSchedule{
+			CourseID:         schedule.CourseID,
+			SubjectID:        schedule.SubjectID,
+			BatchID:          schedule.BatchID,
+			TeacherID:        schedule.TeacherID,
+			TopicName:        schedule.TopicName,
+			ClassDate:        domain.DateStr(newDate),
+			StartTime:        domain.TimeStr(newStartTime),
+			EndTime:          domain.TimeStr(newEndTime),
+			ClassStatus:      "pending",
+			RescheduleReason: &reason,
+			CreatedAt:        time.Now(),
+		}
+		if err := u.repo.CreateSchedule(ctx, newSched); err != nil {
+			return nil, err
+		}
+
+		u.invalidateScheduleCache(ctx)
+		return u.repo.GetScheduleByID(ctx, newSched.ID)
+	}
+
 	// Apply updates
 	if val, ok := updates["subject"]; ok {
 		if val == nil {

@@ -585,6 +585,102 @@ func (u *teacherUsecase) UpdateClass(ctx context.Context, teacherID, classID int
 		return nil, errors.New("you do not have permission to access or modify this class schedule")
 	}
 
+	var statusVal string
+	if s, ok := updates["classStatus"].(string); ok {
+		statusVal = s
+	} else if s, ok := updates["class_status"].(string); ok {
+		statusVal = s
+	}
+
+	if statusVal == "rescheduled" {
+		// 1. Parse new date
+		var newDateStr string
+		if d, ok := updates["classDate"].(string); ok && d != "" {
+			newDateStr = d
+		} else if d, ok := updates["class_date"].(string); ok && d != "" {
+			newDateStr = d
+		}
+		if newDateStr == "" {
+			return nil, errors.New("reschedule date is required")
+		}
+		newDate, err := time.Parse("2006-01-02", newDateStr)
+		if err != nil {
+			return nil, errors.New("invalid reschedule date format")
+		}
+
+		// 2. Parse new start time
+		var newStartTime string
+		if t, ok := updates["startTime"].(string); ok && t != "" {
+			newStartTime = t
+		} else if t, ok := updates["start_time"].(string); ok && t != "" {
+			newStartTime = t
+		}
+		if newStartTime == "" {
+			newStartTime = "10:00"
+		}
+		newStartTime = formatTime(newStartTime)
+
+		// 3. Parse new end time
+		var newEndTime string
+		if t, ok := updates["endTime"].(string); ok && t != "" {
+			newEndTime = t
+		} else if t, ok := updates["end_time"].(string); ok && t != "" {
+			newEndTime = t
+		}
+		if newEndTime == "" {
+			newEndTime = newStartTime
+			tObj, err := time.Parse("15:04", newStartTime[:5])
+			if err == nil {
+				newEndTime = tObj.Add(2 * time.Hour).Format("15:04:05")
+			}
+		}
+		newEndTime = formatTime(newEndTime)
+
+		// 4. Parse reschedule reason
+		var reason string
+		if r, ok := updates["rescheduleReason"].(string); ok {
+			reason = r
+		} else if r, ok := updates["reschedule_reason"].(string); ok {
+			reason = r
+		}
+
+		// 5. Update original row to cancelled and store the formatted reschedule destination info
+		origReason := fmt.Sprintf("Rescheduled to %s %s: %s", newDateStr, newStartTime[:5], reason)
+		schedule.ClassStatus = "cancelled"
+		schedule.RescheduleReason = &origReason
+		if err := u.repo.UpdateClassSchedule(ctx, schedule); err != nil {
+			return nil, err
+		}
+
+		// 6. Create new pending class schedule row
+		newSched := &domain.ClassSchedule{
+			CourseID:         schedule.CourseID,
+			SubjectID:        schedule.SubjectID,
+			BatchID:          schedule.BatchID,
+			TeacherID:        schedule.TeacherID,
+			TopicName:        schedule.TopicName,
+			ClassDate:        newDate,
+			StartTime:        newStartTime,
+			EndTime:          newEndTime,
+			ClassStatus:      "pending",
+			RescheduleReason: &reason,
+			CreatedAt:        time.Now(),
+		}
+		if err := u.repo.CreateClassSchedule(ctx, newSched); err != nil {
+			return nil, err
+		}
+
+		_ = u.repo.LogTeacherActivity(ctx, teacherID, "Rescheduled", "Class Session", fmt.Sprintf("%s to %s", schedule.TopicName, newDateStr))
+		u.invalidateCache(ctx, teacherID)
+		u.invalidateNotesCache(ctx)
+
+		fullSched, _ := u.repo.GetClassScheduleByID(ctx, newSched.ID)
+		if fullSched != nil {
+			return u.serializeSchedule(ctx, *fullSched), nil
+		}
+		return u.serializeSchedule(ctx, *newSched), nil
+	}
+
 	if topicVal, ok := updates["topicName"]; ok {
 		if topic, ok := topicVal.(string); ok {
 			schedule.TopicName = topic
@@ -1515,7 +1611,7 @@ func (u *teacherUsecase) UpdateTaskClass(ctx context.Context, teacherID int64, t
 			}
 			origReason := fmt.Sprintf("Rescheduled to %s %s: %s", reschedDateStr, reschedTimeStr, reschedReasonStr)
 
-			existing.ClassStatus = "rescheduled"
+			existing.ClassStatus = "cancelled"
 			existing.RescheduleReason = &origReason
 			if err := u.repo.UpdateClassSchedule(ctx, existing); err != nil {
 				return nil, err
@@ -1709,7 +1805,7 @@ func (u *teacherUsecase) UpdateTaskClass(ctx context.Context, teacherID int64, t
 			ClassDate:        originalDate,
 			StartTime:        originalStartTime,
 			EndTime:          originalEndTime,
-			ClassStatus:      "rescheduled",
+			ClassStatus:      "cancelled",
 			RescheduleReason: &origReason,
 			CreatedAt:        time.Now(),
 		}
