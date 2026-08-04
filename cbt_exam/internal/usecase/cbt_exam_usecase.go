@@ -685,6 +685,7 @@ func (u *cbtExamUsecase) GetAttemptsMonitoring(ctx context.Context, userID int64
 		index       int
 		score       float64
 		submittedAt time.Time
+		timeTaken   int
 	}
 	var completedList []completedInfo
 
@@ -700,10 +701,19 @@ func (u *cbtExamUsecase) GetAttemptsMonitoring(ctx context.Context, userID int64
 			if att.SubmittedAt != nil {
 				subTime = *att.SubmittedAt
 			}
+
+			duration := 0
+			if att.Result != nil {
+				duration = att.Result.TimeTakenSeconds
+			} else if att.SubmittedAt != nil {
+				duration = int(att.SubmittedAt.Sub(att.StartedAt).Seconds())
+			}
+
 			completedList = append(completedList, completedInfo{
 				index:       idx,
 				score:       att.Score,
 				submittedAt: subTime,
+				timeTaken:   duration,
 			})
 		}
 	}
@@ -711,6 +721,9 @@ func (u *cbtExamUsecase) GetAttemptsMonitoring(ctx context.Context, userID int64
 	sort.Slice(completedList, func(i, j int) bool {
 		if completedList[i].score != completedList[j].score {
 			return completedList[i].score > completedList[j].score
+		}
+		if completedList[i].timeTaken != completedList[j].timeTaken {
+			return completedList[i].timeTaken < completedList[j].timeTaken
 		}
 		return completedList[i].submittedAt.Before(completedList[j].submittedAt)
 	})

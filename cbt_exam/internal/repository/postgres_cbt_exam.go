@@ -251,7 +251,7 @@ func (r *postgresCbtExamRepository) GetResultsForTest(ctx context.Context, testI
 	err := r.db.WithContext(ctx).Table("test_results").
 		Joins("JOIN student_test_attempts ON student_test_attempts.id = test_results.attempt_id").
 		Where("student_test_attempts.test_id = ? AND student_test_attempts.status = 'submitted'", testID).
-		Order("test_results.score DESC, test_results.time_taken_seconds ASC").
+		Order("test_results.score DESC, test_results.time_taken_seconds ASC, student_test_attempts.submitted_at ASC").
 		Find(&results).Error
 	return results, err
 }
