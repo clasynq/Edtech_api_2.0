@@ -450,35 +450,12 @@ func (u *profileUsecase) GetStudyDashboard(ctx context.Context, userID int64, ca
 		return nil, err
 	}
 
-	// Filter schedules using the same rescheduling/cancellation skip-logic from Django monolith
-	// Build map of completed/cancelled topics per course per day
-	completedOrCancelled := make(map[string]bool)
-	for _, s := range schedules {
-		if s.ClassStatus == "completed" || s.ClassStatus == "cancelled" {
-			tDate := time.Time(s.ClassDate)
-			tStr := string(s.StartTime)
-			if len(tStr) >= 5 {
-				tStr = tStr[:5]
-			}
-			key := fmt.Sprintf("%d:%s:%s:%s", s.CourseID, tDate.Format("2006-01-02"), strings.TrimSpace(strings.ToLower(s.TopicName)), tStr)
-			completedOrCancelled[key] = true
-		}
-	}
-
 	upcomingClasses := make([]map[string]interface{}, 0)
 	var liveClass map[string]interface{}
 	todayClasses := make([]map[string]interface{}, 0)
 
 	for _, s := range schedules {
 		tDate := time.Time(s.ClassDate)
-		tStr := string(s.StartTime)
-		if len(tStr) >= 5 {
-			tStr = tStr[:5]
-		}
-		key := fmt.Sprintf("%d:%s:%s:%s", s.CourseID, tDate.Format("2006-01-02"), strings.TrimSpace(strings.ToLower(s.TopicName)), tStr)
-		if completedOrCancelled[key] && (s.ClassStatus == "pending" || s.ClassStatus == "rescheduled") {
-			continue
-		}
 
 		// Fallback for subjectName
 		subjectName := ""
