@@ -770,6 +770,38 @@ func (u *cbtExamUsecase) GetAttemptsMonitoring(ctx context.Context, userID int64
 		})
 	}
 
+	// Sort studentAttemptsData by Rank ascending, ongoing attempts at the bottom
+	sort.Slice(studentAttemptsData, func(i, j int) bool {
+		resI, hasResI := studentAttemptsData[i]["result"].(map[string]interface{})
+		resJ, hasResJ := studentAttemptsData[j]["result"].(map[string]interface{})
+
+		if hasResI && hasResJ {
+			// Both are completed/submitted
+			rankI, hasRankI := resI["rank"].(int)
+			rankJ, hasRankJ := resJ["rank"].(int)
+			if hasRankI && hasRankJ {
+				return rankI < rankJ
+			}
+			if hasRankI {
+				return true
+			}
+			if hasRankJ {
+				return false
+			}
+		}
+		if hasResI {
+			return true // Completed attempts first
+		}
+		if hasResJ {
+			return false
+		}
+		
+		// If both are ongoing, sort by startedAt desc
+		startIStr, _ := studentAttemptsData[i]["startedAt"].(string)
+		startJStr, _ := studentAttemptsData[j]["startedAt"].(string)
+		return startIStr > startJStr
+	})
+
 	return map[string]interface{}{
 		"testTitle":  test.Title,
 		"totalMarks": test.TotalMarks,
